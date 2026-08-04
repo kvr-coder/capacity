@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vite
+coverage
+*.tsbuildinfo
+artifacts
+mock/extract
+mock/compiled
+.env
+.env.*
+!.env.example

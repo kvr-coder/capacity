@@ -1,0 +1,169 @@
+/*
+ * Design tokens — validated data-viz palette.
+ *
+ * The categorical slots below were checked with the dataviz validator in both
+ * modes for the five slots this app uses (one per plant):
+ *   light  #2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4
+ *          worst adjacent CVD dE 9.1 · normal-vision dE 19.6 · 3 slots < 3:1 contrast
+ *   dark   #3987e5,#d95926,#199e70,#c98500,#d55181
+ *          worst adjacent CVD dE 8.4 · normal-vision dE 19.3 · all >= 3:1
+ * The three light-mode slots under 3:1 (aqua, yellow, magenta) trigger the
+ * relief rule: every chart using them ships direct labels and a table view.
+ *
+ * Slot order is the CVD-safety mechanism. Do not reorder, and never generate a
+ * ninth hue — fold the tail into "Other" or facet instead.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* --- surfaces & ink ------------------------------------------------- */
+  --surface-1: #fcfcfb; /* chart / card surface */
+  --surface-0: #f9f9f7; /* page plane */
+  --surface-2: #ffffff; /* raised (menus, tooltips) */
+  --surface-sunken: #f2f1ed;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --border-strong: rgba(11, 11, 11, 0.18);
+  --shadow-1: 0 1px 2px rgba(11, 11, 11, 0.06), 0 4px 12px rgba(11, 11, 11, 0.05);
+  --shadow-2: 0 2px 6px rgba(11, 11, 11, 0.1), 0 12px 32px rgba(11, 11, 11, 0.12);
+
+  /* --- categorical (identity: one slot per plant) --------------------- */
+  --series-1: #2a78d6; /* blue */
+  --series-2: #eb6834; /* orange */
+  --series-3: #1baf7a; /* aqua */
+  --series-4: #eda100; /* yellow */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green */
+  --series-7: #4a3aa7; /* violet */
+  --series-8: #e34948; /* red */
+  --series-other: #898781;
+
+  /* --- sequential (magnitude): one hue, light -> dark ------------------ */
+  --seq-100: #cde2fb;
+  --seq-150: #b7d3f6;
+  --seq-200: #9ec5f4;
+  --seq-250: #86b6ef;
+  --seq-300: #6da7ec;
+  --seq-350: #5598e7;
+  --seq-400: #3987e5;
+  --seq-450: #2a78d6;
+  --seq-500: #256abf;
+  --seq-550: #1c5cab;
+  --seq-600: #184f95;
+  --seq-650: #104281;
+  --seq-700: #0d366b;
+
+  /* --- diverging (polarity): blue = headroom, red = overload ---------- */
+  /* Neutral midpoint reads as "balanced", never a hue. */
+  --div-neg-4: #0d366b;
+  --div-neg-3: #1c5cab;
+  --div-neg-2: #3987e5;
+  --div-neg-1: #9ec5f4;
+  --div-mid: #f0efec;
+  --div-pos-1: #f6bcbb;
+  --div-pos-2: #e88b8a;
+  --div-pos-3: #d03b3b;
+  --div-pos-4: #8f2020;
+
+  /* --- status (reserved — never a series color) ----------------------- */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --delta-good-text: #006300;
+  --delta-bad-text: #b32424;
+
+  /* --- shape ---------------------------------------------------------- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    color-scheme: dark;
+
+    --surface-1: #1a1a19;
+    --surface-0: #0d0d0d;
+    --surface-2: #232322;
+    --surface-sunken: #131312;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.55), 0 12px 32px rgba(0, 0, 0, 0.5);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+
+    --div-mid: #383835;
+    --div-pos-1: #6e2b2b;
+    --div-pos-2: #a13636;
+    --div-pos-3: #d03b3b;
+    --div-pos-4: #e88b8a;
+    --div-neg-1: #184f95;
+    --div-neg-2: #2a78d6;
+    --div-neg-3: #5598e7;
+    --div-neg-4: #9ec5f4;
+
+    --delta-good-text: #0ca30c;
+    --delta-bad-text: #e66767;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-1: #1a1a19;
+  --surface-0: #0d0d0d;
+  --surface-2: #232322;
+  --surface-sunken: #131312;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --gridline: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.55), 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --div-mid: #383835;
+  --div-pos-1: #6e2b2b;
+  --div-pos-2: #a13636;
+  --div-pos-3: #d03b3b;
+  --div-pos-4: #e88b8a;
+  --div-neg-1: #184f95;
+  --div-neg-2: #2a78d6;
+  --div-neg-3: #5598e7;
+  --div-neg-4: #9ec5f4;
+
+  --delta-good-text: #0ca30c;
+  --delta-bad-text: #e66767;
+}
