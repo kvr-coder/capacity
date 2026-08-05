@@ -13,17 +13,25 @@
 import type {
   Bottleneck,
   CapacityPool,
+  EngineOptions,
+  Feature,
   Filters,
   Kpis,
+  MachineClass,
   MaterialId,
   ModelResult,
+  Plant,
+  ProductFamily,
+  ProductGroup,
   ReliefCandidate,
   RollupCell,
   RollupLevel,
   Scenario,
   SnapshotMeta,
+  StandardOperation,
   TimeGrid,
   WeekIndex,
+  WorkCenter,
   WorkCenterId,
   WorkCenterWeekLoad,
 } from '@/domain/types'
@@ -32,13 +40,13 @@ import type {
 export interface CatalogPayload {
   meta: SnapshotMeta
   time: TimeGrid
-  plants: import('@/domain/types').Plant[]
-  workCenters: import('@/domain/types').WorkCenter[]
-  machineClasses: import('@/domain/types').MachineClass[]
-  features: import('@/domain/types').Feature[]
-  standardOperations: import('@/domain/types').StandardOperation[]
-  families: import('@/domain/types').ProductFamily[]
-  groups: import('@/domain/types').ProductGroup[]
+  plants: Plant[]
+  workCenters: WorkCenter[]
+  machineClasses: MachineClass[]
+  features: Feature[]
+  standardOperations: StandardOperation[]
+  families: ProductFamily[]
+  groups: ProductGroup[]
   /** Group -> material count. The 15,000 materials themselves stay in the worker. */
   materialCountByGroup: Record<string, number>
 }
@@ -50,7 +58,7 @@ export type WorkerRequest =
       /** `factory` generates deterministically; `csv` parses supplied extracts. */
       source: { kind: 'factory'; profile: string; seed: number } | { kind: 'csv'; files: Record<string, string> }
     }
-  | { id: number; type: 'run'; scenario: Scenario; filters: Filters; options?: import('@/domain/types').EngineOptions }
+  | { id: number; type: 'run'; scenario: Scenario; filters: Filters; options?: EngineOptions }
   | {
       id: number
       type: 'rollup'

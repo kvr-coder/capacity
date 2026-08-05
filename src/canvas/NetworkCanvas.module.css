@@ -1,0 +1,407 @@
+/*
+ * Network canvas shell.
+ *
+ * Chrome above, stage in the middle, table twin below. The stage is the only
+ * thing allowed to be busy; everything around it is hairline and quiet.
+ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+/* --- chrome -------------------------------------------------------------- */
+
+.chrome {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.crumb {
+  padding: 4px 9px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.crumb:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--surface-sunken);
+}
+
+.crumb[aria-current='page'] {
+  color: var(--text-primary);
+  background: var(--surface-sunken);
+  border-color: var(--border);
+  font-weight: 650;
+}
+
+.crumb:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.crumbSep {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.scale {
+  flex: 1;
+  min-width: 140px;
+  max-width: 320px;
+}
+
+.chromeRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.runtime {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.zoomButtons {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.zoomButtons button {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.zoomButtons button:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
+/* --- stage --------------------------------------------------------------- */
+
+.stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: var(--surface-0);
+  touch-action: none;
+  cursor: grab;
+  outline: none;
+}
+
+.stage[data-panning='yes'] {
+  cursor: grabbing;
+}
+
+.stage:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--text-primary);
+}
+
+.stage[data-busy='yes'] .svg {
+  opacity: 0.62;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .svg {
+    transition: opacity 160ms ease;
+  }
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 2;
+}
+
+.edgeCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* --- edges (shared with CapabilityEdges.tsx) ----------------------------- */
+
+.edgeGroup {
+  pointer-events: none;
+}
+
+.edge {
+  stroke: var(--text-muted);
+  fill: none;
+}
+
+.edgeHot {
+  stroke: var(--text-primary);
+  fill: none;
+}
+
+/* --- hud ----------------------------------------------------------------- */
+
+.hud {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(460px, calc(100% - 28px));
+  pointer-events: none;
+}
+
+/*
+ * On the globe the composition is fitted to the plants themselves, and the
+ * southern-most plant sits close to the bottom edge — a legend parked down
+ * there would print straight over its label. The Arctic above the frame is the
+ * one part of this view that is reliably empty, so that is where it goes.
+ */
+.hud[data-level='globe'] {
+  top: 12px;
+  bottom: auto;
+}
+
+.edgeLegend,
+.arcLegend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 8px 11px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+
+.legendTitle {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendMark {
+  display: block;
+  flex: none;
+}
+
+.legendLabel {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.legendHint {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legendHidden {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.legendChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  width: 100%;
+}
+
+.legendChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-primary);
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.keys {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.keys kbd {
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+
+/* --- status -------------------------------------------------------------- */
+
+.status {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  background: var(--surface-0);
+}
+
+.statusInner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.statusMark {
+  display: block;
+  color: var(--text-secondary);
+}
+
+.status[data-tone='error'] .statusMark {
+  color: var(--status-critical);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .statusSpin {
+    transform-origin: 12px 12px;
+    animation: spin 900ms linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.statusTitle {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 620;
+  color: var(--text-primary);
+}
+
+.statusBody {
+  margin: 3px 0 0;
+  max-width: 40ch;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* --- footer & table ------------------------------------------------------ */
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.tableToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.tableToggle:hover {
+  color: var(--text-primary);
+  background: var(--surface-sunken);
+}
+
+.footerNote {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tablePanel {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.crumb:focus-visible,
+.zoomButtons button:focus-visible,
+.tableToggle:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}

@@ -1,0 +1,274 @@
+/*
+ * Work-center layer.
+ *
+ * The load strip and the OEE curve follow the house mark spec: bars capped at
+ * 24px with a rounded data end and a square baseline end, 2px lines, >=8px
+ * markers, hairline solid gridlines, no dashes on anything that carries data.
+ */
+
+.layer {
+  pointer-events: none;
+}
+
+/* --- focused node -------------------------------------------------------- */
+
+.focusDisc {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.focusTrack {
+  stroke: var(--surface-sunken);
+}
+
+.focusValue {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.focusValueNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .focusRing {
+    transition: stroke-dashoffset 180ms ease, stroke 180ms ease;
+  }
+}
+
+.title {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+.meta {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.metaChip {
+  fill: var(--surface-sunken);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.metaChipText {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* --- section chrome ------------------------------------------------------ */
+
+.sectionLabel {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.panelTitle {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.panelNote {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+}
+
+.panelPlate {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.axisLabel {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.baseline {
+  stroke: var(--axis);
+  stroke-width: 1;
+}
+
+.gridline {
+  stroke: var(--gridline);
+  stroke-width: 1;
+}
+
+.ceilingRule {
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+  opacity: 0.55;
+}
+
+/* --- chips --------------------------------------------------------------- */
+
+.chip {
+  pointer-events: none;
+}
+
+.chipPlate {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chipGrip {
+  fill: var(--axis);
+}
+
+.chipLabel {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.chipHours {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- ghosts -------------------------------------------------------------- */
+
+.ghost {
+  pointer-events: none;
+}
+
+.ghostDisc {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.ghostCode {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.ghostValue {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ghostNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+}
+
+/* --- downtime ------------------------------------------------------------ */
+
+.downtimeTrack {
+  fill: var(--surface-sunken);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.downtimeBand {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.downtimeLabel {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* --- oee ----------------------------------------------------------------- */
+
+.oeeLine {
+  stroke: var(--seq-450);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.oeeDot {
+  fill: var(--seq-450);
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+
+.oeeValue {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- empty states -------------------------------------------------------- */
+
+.emptyPlate {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+}
+
+.emptyBody {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.emptyBodySmall {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+/* --- interaction --------------------------------------------------------- */
+
+.grab {
+  fill: transparent;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.grab:active {
+  cursor: grabbing;
+}
+
+.grabQuiet {
+  fill: transparent;
+  pointer-events: auto;
+}

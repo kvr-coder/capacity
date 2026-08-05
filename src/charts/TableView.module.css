@@ -1,0 +1,85 @@
+/* Wide tables scroll inside their own container — the page never scrolls sideways. */
+.scroller {
+  max-width: 100%;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.caption {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.table th,
+.table td {
+  padding: 5px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--axis);
+}
+
+.table tbody tr:last-child th,
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.left {
+  text-align: left;
+}
+
+.right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rowHead {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* The colour key sits beside the label — never on the text itself. */
+.key {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  vertical-align: baseline;
+  border-radius: 2px;
+  background: var(--series-other);
+}
+
+.keySpacer {
+  display: inline-block;
+  width: 8px;
+  margin-right: 7px;
+}
+
+.empty {
+  padding: 16px 10px;
+  text-align: center;
+  color: var(--text-muted);
+}

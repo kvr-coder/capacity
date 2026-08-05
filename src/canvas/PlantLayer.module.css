@@ -1,0 +1,229 @@
+/*
+ * Plant layer.
+ *
+ * Hairline chrome, one step of tone between the column band and the page, and
+ * nothing coloured except the utilisation ring and the plant identity chips.
+ * Every value here is a token.
+ */
+
+.layer {
+  pointer-events: none;
+}
+
+/* --- stage columns ------------------------------------------------------- */
+
+.columnBand {
+  fill: var(--surface-sunken);
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+
+.columnStage {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.columnLabel {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.columnCount {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- machine-class groups ------------------------------------------------ */
+
+.groupBox {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.groupLabel {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+}
+
+/* --- nodes --------------------------------------------------------------- */
+
+.node {
+  pointer-events: none;
+}
+
+.node[data-dimmed='yes'] {
+  opacity: 0.3;
+}
+
+.disc {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.ringTrack {
+  stroke: var(--surface-sunken);
+}
+
+.proposedRing {
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.classMonogram {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  letter-spacing: 0.12em;
+}
+
+.nodeCode {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.nodeValue {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.badgePlate {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.badgeText {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.focusRing {
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+
+.sourceRing {
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  opacity: 0.55;
+  stroke-dasharray: 2 3;
+}
+
+.targetChipPlate {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.targetChipText {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.hit {
+  fill: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.node[data-state='selected'] .disc,
+.node[data-state='hovered'] .disc {
+  stroke: var(--border-strong);
+}
+
+/* Motion only where it explains something: the ring moving to its projected
+   value during a drag is the explanation. */
+@media (prefers-reduced-motion: no-preference) {
+  .ringValue {
+    transition: stroke-dashoffset 180ms ease, stroke 180ms ease;
+  }
+
+  .node {
+    transition: opacity 160ms ease;
+  }
+}
+
+/* --- satellites ---------------------------------------------------------- */
+
+.satellite {
+  pointer-events: none;
+}
+
+.satellitePlate {
+  fill: var(--surface-2);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.satelliteLabel {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.satelliteDot {
+  fill: var(--surface-1);
+  stroke: var(--border-strong);
+}
+
+.satelliteSlotLabel {
+  fill: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.satelliteSlot[data-legal='no'] {
+  opacity: 0.28;
+}
+
+.satelliteOverflow {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+
+/* --- empty state --------------------------------------------------------- */
+
+.emptyPlate {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+}
+
+.emptyTitle {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.emptyBody {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}

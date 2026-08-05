@@ -1,0 +1,169 @@
+/*
+ * Globe layer.
+ *
+ * The map is background and is styled like background: one step of contrast
+ * between ocean and land, hairline graticule, no outlines competing with the
+ * bubbles. Every colour is a token.
+ */
+
+.layer {
+  pointer-events: none;
+}
+
+.ocean {
+  fill: var(--surface-sunken);
+}
+
+.land {
+  fill: var(--surface-1);
+  stroke: var(--gridline);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.graticule {
+  stroke: var(--gridline);
+  stroke-width: 1;
+  opacity: 0.65;
+}
+
+.graticuleMajor {
+  stroke: var(--axis);
+  stroke-width: 1;
+  opacity: 0.8;
+}
+
+/* --- arcs ---------------------------------------------------------------- */
+
+.arcs {
+  pointer-events: none;
+}
+
+.arcHalo {
+  stroke: var(--surface-sunken);
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.arc {
+  opacity: 0.62;
+}
+
+.arcHead {
+  opacity: 0.85;
+}
+
+/* --- bubbles ------------------------------------------------------------- */
+
+.bubble {
+  pointer-events: none;
+}
+
+.surfaceRing {
+  stroke: var(--surface-1);
+}
+
+.focusRing {
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+  opacity: 0.75;
+}
+
+/* --- leader lines -------------------------------------------------------- */
+
+/*
+ * A displaced bubble owes the reader the truth about where the site is. The
+ * line is a hairline and the anchor is a 2px dot with a surface ring: present
+ * enough to follow, quiet enough that it never reads as data.
+ */
+.leaderGroup {
+  pointer-events: none;
+}
+
+.leaderHalo {
+  stroke: var(--surface-1);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.leader {
+  stroke: var(--text-secondary);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+.anchorRing {
+  fill: var(--surface-1);
+  stroke: var(--text-secondary);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.anchorDot {
+  fill: var(--text-primary);
+}
+
+/* --- clusters ------------------------------------------------------------ */
+
+/*
+ * A cluster stands for several plants, so it wears none of their colours —
+ * a neutral disc with a dashed edge, which is the same "this is provisional,
+ * zoom in" language the proposed work-center ring uses.
+ */
+.clusterDisc {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+  stroke-width: 2;
+}
+
+.clusterRing {
+  stroke: var(--axis);
+  stroke-width: 1.5;
+}
+
+.labelPlate {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.94;
+}
+
+.labelPlateStrong {
+  fill: var(--surface-1);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  opacity: 0.98;
+}
+
+.bubbleLabel {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.bubbleValue {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--surface-1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.hit {
+  fill: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bubble circle {
+    transition: fill 180ms ease;
+  }
+}

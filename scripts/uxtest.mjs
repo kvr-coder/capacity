@@ -17,6 +17,7 @@
 
 import { chromium } from 'playwright'
 import { mkdir, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
@@ -32,6 +33,7 @@ const VIEWPORT = { width: 1680, height: 1050 }
 const results = []
 const consoleErrors = []
 const pageErrors = []
+const failedRequests = []
 let shotIndex = 0
 
 function record(name, ok, detail) {
@@ -124,10 +126,17 @@ async function gotoRoute(page, hash, label) {
 async function main() {
   await mkdir(SHOT_DIR, { recursive: true })
 
-  const browser = await chromium.launch({
+  // The environment ships a pinned Chromium at PLAYWRIGHT_BROWSERS_PATH whose
+  // build number need not match the npm playwright package's expectation, and
+  // `playwright install` is not available here. Point at the real binary when
+  // it exists and let Playwright resolve normally otherwise.
+  const explicit = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
+  const launchOpts = {
     headless: !args.includes('--headed'),
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  })
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+  }
+  if (existsSync(explicit)) launchOpts.executablePath = explicit
+  const browser = await chromium.launch(launchOpts)
   const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 })
   const page = await context.newPage()
 
@@ -135,6 +144,14 @@ async function main() {
     if (msg.type() === 'error') consoleErrors.push(msg.text().slice(0, 300))
   })
   page.on('pageerror', (err) => pageErrors.push(String(err).slice(0, 300)))
+  // A bare "Failed to load resource" console line names no URL, which makes it
+  // unactionable. Capture the actual failing request instead.
+  page.on('response', (res) => {
+    if (res.status() >= 400) failedRequests.push(`${res.status()} ${res.url()}`)
+  })
+  page.on('requestfailed', (req) => {
+    failedRequests.push(`FAILED ${req.url()} (${req.failure()?.errorText ?? 'unknown'})`)
+  })
 
   console.log(`\n=== Capacity Cockpit — browser proof ===\nURL: ${BASE}\n`)
 
@@ -223,6 +240,43 @@ async function main() {
     net.counts.canvas > 0 || net.counts.paths > 40,
     `${net.counts.canvas} canvas, ${net.counts.paths} paths, ${net.counts.svg} svg`,
   )
+  // The globe draws five bubbles on one map. Two of the plants are ~500km
+  // apart, which at world scale is less than one bubble, so the layout has to
+  // separate them: a label printed over another label is a plant that has
+  // silently disappeared from the network.
+  const globe = await page.evaluate(() => {
+    const codes = Array.from(document.querySelectorAll('svg text'))
+      .map((t) => ({ text: (t.textContent || '').trim(), box: t.getBoundingClientRect() }))
+      .filter((t) => /^[A-Z]{2}-[A-Z]{3}$/.test(t.text) && t.box.width > 0)
+      .map((t) => ({ text: t.text, x: t.box.x, y: t.box.y, w: t.box.width, h: t.box.height }))
+    const overlaps = []
+    for (let i = 0; i < codes.length; i += 1) {
+      for (let j = i + 1; j < codes.length; j += 1) {
+        const a = codes[i]
+        const b = codes[j]
+        if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+          overlaps.push(`${a.text}/${b.text}`)
+        }
+      }
+    }
+    const hudEl = document.querySelector('[class*="hud"]')
+    const hud = hudEl ? hudEl.getBoundingClientRect() : null
+    const hidden = hud
+      ? codes.filter((c) => c.x < hud.x + hud.width && hud.x < c.x + c.w && c.y < hud.y + hud.height && hud.y < c.y + c.h)
+      : []
+    return { count: codes.length, labels: codes.map((c) => c.text), overlaps, hidden: hidden.map((c) => c.text) }
+  })
+  record(
+    'Every plant on the globe carries its own readable label',
+    globe.count >= 5 && globe.overlaps.length === 0,
+    `${globe.count} labels (${globe.labels.join(', ')}), ${globe.overlaps.length} colliding${globe.overlaps.length ? `: ${globe.overlaps.join(' ')}` : ''}`,
+  )
+  record(
+    'No plant label is buried under the canvas legend',
+    globe.hidden.length === 0,
+    globe.hidden.length ? globe.hidden.join(', ') : 'all clear of the HUD',
+  )
+
   // Try to zoom into a plant by clicking the largest circle.
   const zoomed = await page.evaluate(() => {
     const circles = Array.from(document.querySelectorAll('svg circle'))
@@ -238,6 +292,33 @@ async function main() {
     await shot(page, 'network-zoomed')
     const after = await countElements(page)
     record('Clicking a plant changes the view', after.text !== net.counts.text, `text ${net.counts.text} -> ${after.text}`)
+
+    // Changing the breadcrumb is not drilling. The canvas itself has to travel:
+    // globe -> plant means the plant's work centers are on screen.
+    const drilled = await page.evaluate(() => {
+      const text = document.getElementById('root')?.innerText || ''
+      return {
+        workCenterNodes: (text.match(/[A-Z]{2}-[A-Z]{3}-WC\d{3}/g) || []).length,
+        circles: document.querySelectorAll('svg circle').length,
+      }
+    })
+    record(
+      'A single click drills the canvas into the plant layer',
+      drilled.workCenterNodes > 5 && drilled.circles > net.counts.svg,
+      `${drilled.workCenterNodes} work-center codes drawn, ${drilled.circles} circles`,
+    )
+
+    // Backspace is the way back out, and it has to actually come back out.
+    await page.evaluate(() => {
+      const stage = document.querySelector('[role="application"]')
+      if (stage instanceof HTMLElement) stage.focus()
+    })
+    await page.keyboard.press('Backspace')
+    await page.waitForTimeout(1200)
+    const out = await page.evaluate(
+      () => ((document.getElementById('root')?.innerText || '').match(/[A-Z]{2}-[A-Z]{3}-WC\d{3}/g) || []).length,
+    )
+    record('Backspace zooms back out one level', out < drilled.workCenterNodes, `${drilled.workCenterNodes} -> ${out} work-center codes`)
   } else {
     record('Plant node clickable', false, 'no svg circle found to click')
   }
@@ -274,51 +355,103 @@ async function main() {
   const scen = await gotoRoute(page, '/scenarios', 'scenarios')
   record('Scenarios screen renders', scen.counts.text > 300, `${scen.counts.text} chars`)
 
-  // Apply a starter move if one is offered, then undo it.
-  const kpiBefore = await numericFingerprint(page)
-  const applied = await page.evaluate(() => {
-    const buttons = Array.from(document.querySelectorAll('button'))
-    const target = buttons.find((b) =>
-      /ceiling|ramp|move .*off|add (a )?move|apply|start a/i.test(b.textContent || ''),
-    )
-    if (!target) return null
-    target.click()
-    return (target.textContent || '').trim().slice(0, 60)
+  const starterButtons = await page.evaluate(
+    () =>
+      Array.from(document.querySelectorAll('button'))
+        .map((b) => (b.textContent || '').trim())
+        .filter((t) => t.length > 0 && t.length < 60).length,
+  )
+  record('Scenarios screen offers actions', starterButtons > 3, `${starterButtons} buttons`)
+
+  // --------------------------------------------- applying a move (the core)
+  // Drive the Cockpit's utilisation-ceiling slider. It writes a real
+  // `utilisationCeiling` move through applyMove, so this exercises the whole
+  // loop: move -> worker re-run -> new numbers -> undo.
+  console.log('\nAPPLY A MOVE + UNDO')
+  await page.goto(`${BASE}/#/`, { waitUntil: 'load' })
+  await page.waitForTimeout(3000)
+
+  const sliderInfo = await page.evaluate(() => {
+    const s = document.querySelector('input[type="range"]')
+    if (!s) return null
+    return { value: s.value, min: s.min, max: s.max, step: s.step }
   })
-  if (applied) {
-    await page.waitForTimeout(3000)
-    await shot(page, 'scenario-move-applied')
+  if (!sliderInfo) {
+    record('Utilisation ceiling control present', false, 'no input[type=range] on the cockpit')
+  } else {
+    const kpiBefore = await numericFingerprint(page)
+    // Keyboard-drive it: this also proves the control is keyboard operable.
+    const slider = page.locator('input[type="range"]').first()
+    await slider.focus()
+    for (let i = 0; i < 12; i += 1) await page.keyboard.press('ArrowLeft')
+    await page.waitForTimeout(3500)
     const kpiAfter = await numericFingerprint(page)
     const changed = kpiBefore.filter((v, i) => kpiAfter[i] !== v).length
-    record('Applying a move changes the model output', changed > 0, `clicked "${applied}", ${changed} values changed`)
+    const sliderAfter = await page.evaluate(
+      () => document.querySelector('input[type="range"]')?.value ?? null,
+    )
+    record(
+      'Lowering the ceiling re-runs the model',
+      changed > 0 && sliderAfter !== sliderInfo.value,
+      `ceiling ${sliderInfo.value} -> ${sliderAfter}, ${changed} values changed`,
+    )
+    await shot(page, 'ceiling-lowered')
+
+    // The baseline is read-only, so applying a move must have forked a scenario.
+    const forked = await page.evaluate(() => {
+      const t = document.getElementById('root')?.innerText || ''
+      return !/read-?only/i.test(t) || /scenario 1/i.test(t)
+    })
+    record('Applying a move forks off the read-only baseline', forked, 'baseline stays immutable')
 
     const undone = await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button'))
-      const u = buttons.find((b) =>
-        /^undo$/i.test((b.textContent || '').trim()) ||
-        /undo/i.test(b.getAttribute('aria-label') || ''),
+      const all = Array.from(document.querySelectorAll('button'))
+      const u = all.find(
+        (b) =>
+          /^undo$/i.test((b.textContent || '').trim()) ||
+          /undo/i.test(b.getAttribute('aria-label') || '') ||
+          /undo/i.test(b.getAttribute('title') || ''),
       )
-      if (!u) return false
+      if (!u || u.disabled) return false
       u.click()
       return true
     })
     if (undone) {
-      await page.waitForTimeout(3000)
-      const kpiUndo = await numericFingerprint(page)
-      const back = kpiUndo.filter((v, i) => kpiBefore[i] === v).length
-      record('Undo restores the previous model output', back > kpiBefore.length * 0.7, `${back}/${kpiBefore.length} values back`)
-      await shot(page, 'scenario-undone')
+      await page.waitForTimeout(3500)
+      const back = await page.evaluate(
+        () => document.querySelector('input[type="range"]')?.value ?? null,
+      )
+      record('Undo restores the previous ceiling', back === sliderInfo.value, `${sliderAfter} -> ${back} (was ${sliderInfo.value})`)
+      await shot(page, 'ceiling-undone')
     } else {
-      record('Undo control present', false, 'no undo button found')
+      record('Undo control is available after a move', false, 'no enabled undo button found')
     }
-  } else {
-    record('A move can be applied from the Scenarios screen', false, 'no starter-move button found')
   }
 
   // ---------------------------------------------------------------- data
   console.log('\nDATA')
   const data = await gotoRoute(page, '/data', 'data-admin')
-  record('Data screen lists master data', data.counts.rows > 5, `${data.counts.rows} rows`)
+  // The default tab is Plants, which legitimately has exactly five rows —
+  // asserting "more than five" here was testing the wrong thing.
+  record('Data screen lists master data', data.counts.rows >= 5, `${data.counts.rows} rows on the default tab`)
+
+  // Switching to Work centers must produce many more rows, which is the real
+  // proof that the tabs are wired to different datasets.
+  const switched = await page.evaluate(() => {
+    const tabs = Array.from(document.querySelectorAll('[role="tab"], button'))
+    const target = tabs.find((t) => /work\s*cent/i.test(t.textContent || ''))
+    if (!target) return false
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    return true
+  })
+  if (switched) {
+    await page.waitForTimeout(2000)
+    const after = await countElements(page)
+    record('Switching to the work-center tab loads 150 rows', after.rows > 100, `${after.rows} rows`)
+    await shot(page, 'data-workcenters')
+  } else {
+    record('Data tabs are switchable', false, 'no work-center tab found')
+  }
 
   // ----------------------------------------------------------- dark mode
   console.log('\nTHEME')
@@ -362,10 +495,16 @@ async function main() {
 
   // ------------------------------------------------------------- console
   console.log('\nCONSOLE HEALTH')
+  const realFailures = failedRequests.filter((u) => !/favicon/i.test(u))
   const realErrors = consoleErrors.filter(
-    (e) => !/favicon|DevTools|Download the React DevTools|source map/i.test(e),
+    (e) =>
+      !/favicon|DevTools|Download the React DevTools|source map/i.test(e) &&
+      // A generic "Failed to load resource" line is only meaningful when the
+      // request behind it was not a favicon; failedRequests is the real signal.
+      !(/Failed to load resource/i.test(e) && realFailures.length === 0),
   )
   record('No uncaught page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | ') || 'clean')
+  record('No failed network requests', realFailures.length === 0, realFailures.slice(0, 4).join(' | ') || 'clean (favicon ignored)')
   record('No console errors', realErrors.length === 0, realErrors.slice(0, 3).join(' | ') || 'clean')
 
   await browser.close()
@@ -382,7 +521,11 @@ async function main() {
 
   await writeFile(
     path.join(SHOT_DIR, 'report.json'),
-    JSON.stringify({ base: BASE, passed, failed, results, consoleErrors: realErrors, pageErrors }, null, 2),
+    JSON.stringify(
+      { base: BASE, passed, failed, results, consoleErrors: realErrors, pageErrors, failedRequests },
+      null,
+      2,
+    ),
   )
 
   process.exit(failed > 0 ? 1 : 0)

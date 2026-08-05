@@ -1,0 +1,285 @@
+/*
+ * Global stylesheet.
+ *
+ * Everything colour comes from `tokens.css` — there is not a single hex below.
+ * What lives here is the reset, the type scale, the focus ring, the shared
+ * layout metrics the shell and every screen measure against, and the two
+ * behaviours that are accessibility rather than decoration: a reduced-motion
+ * block that turns every transition off, and a print stylesheet that drops the
+ * chrome so a planner can put a screen in front of a steering committee.
+ *
+ * One rule is structural: **the page never scrolls horizontally.** Wide content
+ * scrolls inside its own container. A dense tool that shunts sideways under the
+ * reader loses them instantly.
+ */
+
+/* --- metrics --------------------------------------------------------------
+ * Not colour, so not in tokens.css. These are the numbers the shell, the filter
+ * bar and every screen share so vertical rhythm survives being edited by
+ * eleven different hands.
+ */
+:root {
+  --rail-width: 208px;
+  --rail-width-collapsed: 60px;
+  --header-height: 52px;
+  --filterbar-height: 52px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 19px;
+  --text-2xl: 26px;
+
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* --- reset ---------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* The page plane never scrolls sideways; wide content owns its own scroller. */
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: 1.45;
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-size: inherit;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* A disabled control that still shows a pointer is lying about being clickable. */
+button:disabled,
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img,
+svg,
+canvas,
+video {
+  display: block;
+  max-width: 100%;
+}
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+/* Numbers that sit in a column must not jitter as their digits change. */
+.tabular,
+table td,
+table th {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* --- focus ---------------------------------------------------------------- */
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The ring must stay visible on a dark card as well as on the page plane. */
+::selection {
+  background: var(--seq-200);
+  color: var(--text-primary);
+}
+
+/* --- scrollbars ----------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--axis) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--axis);
+  border: 3px solid var(--surface-0);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* --- utilities ------------------------------------------------------------ */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- motion --------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- print ----------------------------------------------------------------
+ * A screen from this tool ends up in a steering-committee pack. Printing drops
+ * the navigation, flattens the surfaces so ink is not wasted on cards, and lets
+ * content flow past the viewport height it was laid out in.
+ */
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+    overflow: visible;
+    background: var(--surface-2);
+  }
+
+  [data-print='hide'],
+  nav[aria-label='Screens'],
+  [role='banner'] {
+    display: none !important;
+  }
+
+  [data-print='expand'] {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  a[href^='http']::after {
+    content: ' (' attr(href) ')';
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+
+  section,
+  table,
+  figure {
+    break-inside: avoid;
+  }
+}
