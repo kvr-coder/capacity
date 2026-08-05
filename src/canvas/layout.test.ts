@@ -22,14 +22,17 @@ import {
   layoutArcs,
   layoutGhostFan,
   layoutGlobe,
-  layoutSatellites,
+  layoutPartnerDock,
   layoutStageColumns,
   layoutStrip,
+  pickDockCardTarget,
   placeGlobeLabels,
   previewImpact,
+  resolveDropTarget,
   utilisationSignal,
 } from '@/canvas/layout'
 import type {
+  DockInput,
   EdgeInput,
   GlobeMark,
   GlobeSite,
@@ -524,6 +527,18 @@ describe('layoutStageColumns', () => {
     }
   })
 
+  it('stacks the biggest fleet first, breaking ties on the name the reader sees', () => {
+    const mixed: StageNodeInput[] = [
+      ...['a1', 'a2'].map((id) => ({ id, code: id, classId: 'C-Z', className: 'Alpha', stage: 10 })),
+      ...['b1', 'b2', 'b3'].map((id) => ({ id, code: id, classId: 'C-Y', className: 'Beta', stage: 10 })),
+      ...['c1', 'c2'].map((id) => ({ id, code: id, classId: 'C-X', className: 'Zeta', stage: 10 })),
+    ]
+    const column = at(layoutStageColumns(mixed, labels).columns, 0, 'column')
+    // Three before the twos; between the twos, `Alpha` before `Zeta` — which is
+    // the reverse of what sorting on the invisible class id would have produced.
+    expect(column.groups.map((group) => group.className)).toEqual(['Beta', 'Alpha', 'Zeta'])
+  })
+
   it('never places two nodes closer than their diameter', () => {
     const layout = layoutStageColumns(inputs({ 10: 12, 20: 9, 30: 15 }), labels)
     expect(layout.nodes).toHaveLength(36)
@@ -574,86 +589,141 @@ describe('layoutStageColumns', () => {
   })
 })
 
-describe('layoutSatellites', () => {
-  const bounds = { x: 0, y: 0, width: 600, height: 400 }
+describe('layoutPartnerDock', () => {
+  const gridBounds = { x: 0, y: 0, width: 600, height: 400 }
 
-  it('rings the grid, first satellite above it, deterministically', () => {
-    const satellites = layoutSatellites(
-      [
-        { plantId: 'P2', label: 'Wroclaw', siblings: [] },
-        { plantId: 'P3', label: 'Suzhou', siblings: [] },
-      ],
-      { bounds, orbit: 100 },
-    )
-    expect(satellites).toHaveLength(2)
-    const first = at(satellites, 0, 'satellite')
-    expect(first.x).toBeCloseTo(300, 6)
-    expect(first.y).toBeLessThan(bounds.y)
-    expect(layoutSatellites([{ plantId: 'P2', label: 'x', siblings: [] }], { bounds })).toEqual(
-      layoutSatellites([{ plantId: 'P2', label: 'x', siblings: [] }], { bounds }),
-    )
-  })
-
-  it('keeps the heaviest siblings and reports the overflow honestly', () => {
-    const siblings = Array.from({ length: 14 }, (_, i) => ({
+  function partners(count: number): DockInput['partners'] {
+    return Array.from({ length: count }, (_, i) => ({
       workCenterId: `WC-${i}`,
-      code: `WC-${i}`,
+      code: `WC-${String(i).padStart(2, '0')}`,
       weight: i,
     }))
-    const satellites = layoutSatellites([{ plantId: 'P2', label: 'x', siblings }], {
-      bounds,
-      maxSlots: 5,
-    })
-    const satellite = at(satellites, 0, 'satellite')
-    expect(satellite.slots).toHaveLength(5)
-    expect(satellite.slots.map((slot) => slot.workCenterId)).toEqual([
-      'WC-13',
-      'WC-12',
-      'WC-11',
-      'WC-10',
-      'WC-9',
-    ])
-    expect(satellite.overflow).toBe(9)
+  }
+
+  it('docks every plant in a gutter clear of the grid, deterministically', () => {
+    const inputs: DockInput[] = [
+      { plantId: 'P2', label: 'Wroclaw', partners: partners(3) },
+      { plantId: 'P3', label: 'Suzhou', partners: partners(5) },
+    ]
+    const dock = layoutPartnerDock(inputs, { gridBounds })
+    expect(dock.cards).toHaveLength(2)
+    for (const card of dock.cards) {
+      expect(card.x).toBeGreaterThanOrEqual(gridBounds.x + gridBounds.width)
+      expect(card.anchor.x).toBe(card.x)
+    }
+    expect(dock.byPlant.get('P3')?.count).toBe(5)
+    expect(layoutPartnerDock(inputs, { gridBounds })).toEqual(layoutPartnerDock(inputs, { gridBounds }))
   })
 
-  it('lays slots in a collision-free row beyond the hub', () => {
-    const siblings = Array.from({ length: 8 }, (_, i) => ({
-      workCenterId: `WC-${i}`,
-      code: `WC-${i}`,
-      weight: 8 - i,
-    }))
-    const satellites = layoutSatellites(
-      [
-        { plantId: 'P2', label: 'a', siblings },
-        { plantId: 'P3', label: 'b', siblings },
-        { plantId: 'P4', label: 'c', siblings },
-        { plantId: 'P5', label: 'd', siblings },
-      ],
-      { bounds, orbit: 160 },
+  it('shows a count instead of nodes until a card is opened', () => {
+    const inputs: DockInput[] = [{ plantId: 'P2', label: 'x', partners: partners(14) }]
+    const closed = at(layoutPartnerDock(inputs, { gridBounds }).cards, 0, 'card')
+    expect(closed.slots).toHaveLength(0)
+    expect(closed.overflow).toBe(0)
+    expect(closed.count).toBe(14)
+    expect(closed.height).toBe(closed.headerHeight)
+
+    const open = at(
+      layoutPartnerDock(inputs, { gridBounds, expanded: new Set(['P2']), maxSlots: 5 }).cards,
+      0,
+      'card',
     )
-    const cx = bounds.x + bounds.width / 2
-    const cy = bounds.y + bounds.height / 2
-    for (const satellite of satellites) {
-      for (let i = 0; i < satellite.slots.length; i += 1) {
-        const a = at(satellite.slots, i, 'slot')
-        // Every slot sits further from the grid centre than the hub plate does.
-        expect(Math.hypot(a.x - cx, a.y - cy)).toBeGreaterThan(Math.hypot(satellite.x - cx, satellite.y - cy))
-        for (let j = i + 1; j < satellite.slots.length; j += 1) {
-          const b = at(satellite.slots, j, 'slot')
-          expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.r + b.r)
-        }
+    expect(open.slots).toHaveLength(5)
+    expect(open.count).toBe(14)
+    // The heaviest partners are the ones kept, and the tail is named not dropped.
+    expect(open.slots.map((slot) => slot.workCenterId)).toEqual(['WC-13', 'WC-12', 'WC-11', 'WC-10', 'WC-9'])
+    expect(open.overflow).toBe(9)
+    expect(open.height).toBeGreaterThan(open.headerHeight)
+  })
+
+  it('stacks cards without overlapping and keeps every slot row inside its card', () => {
+    const inputs: DockInput[] = ['P2', 'P3', 'P4', 'P5'].map((plantId) => ({
+      plantId,
+      label: plantId,
+      partners: partners(8),
+    }))
+    const dock = layoutPartnerDock(inputs, { gridBounds, expanded: new Set(['P3']) })
+    for (let i = 1; i < dock.cards.length; i += 1) {
+      const previous = at(dock.cards, i - 1, 'card')
+      const current = at(dock.cards, i, 'card')
+      expect(current.y).toBeGreaterThanOrEqual(previous.y + previous.height)
+    }
+    for (const card of dock.cards) {
+      for (const slot of card.slots) {
+        expect(slot.rowY).toBeGreaterThanOrEqual(card.y + card.headerHeight - 0.001)
+        expect(slot.rowY + slot.rowHeight).toBeLessThanOrEqual(card.y + card.height + 0.001)
+        expect(slot.rowX).toBeGreaterThanOrEqual(card.x - 0.001)
+        expect(slot.rowX + slot.rowWidth).toBeLessThanOrEqual(card.x + card.width + 0.001)
       }
     }
   })
 
-  it('flattens the orbit vertically so a wide grid does not strand two satellites', () => {
-    const tall = layoutSatellites([{ plantId: 'P2', label: 'a', siblings: [] }], {
-      bounds,
-      orbit: 200,
-      orbitY: 200,
+  it('pulls every rope through a hub between the grid and the card', () => {
+    const dock = layoutPartnerDock([{ plantId: 'P2', label: 'x', partners: partners(2) }], { gridBounds })
+    const card = at(dock.cards, 0, 'card')
+    expect(card.hub.x).toBeLessThan(card.anchor.x)
+    expect(card.hub.y).toBe(card.anchor.y)
+  })
+
+  it('keeps the gutter rectangle independent of what is open', () => {
+    const inputs: DockInput[] = [{ plantId: 'P2', label: 'x', partners: partners(9) }]
+    const closed = layoutPartnerDock(inputs, { gridBounds })
+    const open = layoutPartnerDock(inputs, { gridBounds, expanded: new Set(['P2']) })
+    // The frame is fitted to this; if opening a card moved it, the whole canvas
+    // would rescale under the reader.
+    expect(open.gutter).toEqual(closed.gutter)
+    expect(at(open.cards, 0, 'card').y).toBe(at(closed.cards, 0, 'card').y)
+  })
+
+  it('shrinks an all-open dock until it fits the gutter it lives in', () => {
+    const tall = { x: 0, y: 0, width: 600, height: 700 }
+    const inputs: DockInput[] = ['P2', 'P3', 'P4', 'P5'].map((plantId) => ({
+      plantId,
+      label: plantId,
+      partners: partners(9),
+    }))
+    const all = new Set(inputs.map((input) => input.plantId))
+    const loose = layoutPartnerDock(inputs, { gridBounds: tall, expanded: all })
+    const fitted = layoutPartnerDock(inputs, { gridBounds: tall, expanded: all, fitExpandedToGutter: true })
+    const lastLoose = at(loose.cards, loose.cards.length - 1, 'card')
+    const lastFitted = at(fitted.cards, fitted.cards.length - 1, 'card')
+    // A drop target below the bottom of the frame is a drop target nobody can
+    // reach, and the frame may not grow mid-drag.
+    expect(lastLoose.y + lastLoose.height).toBeGreaterThan(fitted.gutter.y + fitted.gutter.height)
+    expect(lastFitted.y + lastFitted.height).toBeLessThanOrEqual(fitted.gutter.y + fitted.gutter.height)
+    for (const card of fitted.cards) {
+      expect(card.slots.length).toBeGreaterThanOrEqual(1)
+      // Whatever it could not show, it still counts.
+      expect(card.slots.length + card.overflow).toBe(card.count)
+    }
+  })
+
+  it('still offers one slot per card when the gutter is too short for any', () => {
+    const squat = { x: 0, y: 0, width: 600, height: 120 }
+    const inputs: DockInput[] = ['P2', 'P3'].map((plantId) => ({
+      plantId,
+      label: plantId,
+      partners: partners(6),
+    }))
+    const dock = layoutPartnerDock(inputs, {
+      gridBounds: squat,
+      expanded: new Set(['P2', 'P3']),
+      fitExpandedToGutter: true,
     })
-    const flat = layoutSatellites([{ plantId: 'P2', label: 'a', siblings: [] }], { bounds, orbit: 200 })
-    expect(at(flat, 0, 'satellite').y).toBeGreaterThan(at(tall, 0, 'satellite').y)
+    // It degrades rather than producing zero rows or negative geometry.
+    for (const card of dock.cards) {
+      expect(card.slots).toHaveLength(1)
+      expect(card.overflow).toBe(5)
+      expect(Number.isFinite(card.height)).toBe(true)
+    }
+  })
+
+  it('produces an empty dock without NaN geometry', () => {
+    const dock = layoutPartnerDock([], { gridBounds })
+    expect(dock.cards).toHaveLength(0)
+    expect(dock.byPlant.size).toBe(0)
+    expect(Number.isFinite(dock.gutter.x)).toBe(true)
+    expect(Number.isFinite(dock.gutter.height)).toBe(true)
   })
 })
 
@@ -1066,5 +1136,130 @@ describe('placeGlobeLabels', () => {
     for (const target of targets) {
       expect(reversed.get(target.id)).toEqual(forward.get(target.id))
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Drop surfaces
+// ---------------------------------------------------------------------------
+
+describe('resolveDropTarget', () => {
+  const grid: StageNodeInput[] = [
+    { id: 'A', code: 'A', classId: 'C-A', className: 'Class A', stage: 10 },
+    { id: 'B', code: 'B', classId: 'C-A', className: 'Class A', stage: 10 },
+  ]
+  const layout = layoutStageColumns(grid, new Map([[10, 'Mould']]))
+  const dockInputs: DockInput[] = [
+    {
+      plantId: 'P2',
+      label: 'Wroclaw',
+      partners: [
+        { workCenterId: 'R1', code: 'R1', weight: 9 },
+        { workCenterId: 'R2', code: 'R2', weight: 4 },
+        { workCenterId: 'R3', code: 'R3', weight: 1 },
+      ],
+    },
+  ]
+  const gridBounds = { x: 0, y: 0, width: layout.width, height: Math.max(layout.height, 200) }
+  const openDock = layoutPartnerDock(dockInputs, { gridBounds, expanded: new Set(['P2']), maxSlots: 2 })
+  const closedDock = layoutPartnerDock(dockInputs, { gridBounds })
+  const anything = (): boolean => true
+
+  it('lands on the node under the pointer', () => {
+    const node = at(layout.nodes, 1, 'node')
+    expect(resolveDropTarget({ x: node.x, y: node.y }, { nodes: layout.nodes, dock: openDock }, anything)).toBe(
+      node.id,
+    )
+  })
+
+  it('lands on nothing when the pointer is over bare stage', () => {
+    expect(
+      resolveDropTarget({ x: -500, y: -500 }, { nodes: layout.nodes, dock: openDock }, anything),
+    ).toBeNull()
+  })
+
+  it('lands on a row inside an opened dock card', () => {
+    const slot = at(at(openDock.cards, 0, 'card').slots, 1, 'slot')
+    expect(
+      resolveDropTarget(
+        { x: slot.rowX + 4, y: slot.rowY + slot.rowHeight / 2 },
+        { nodes: layout.nodes, dock: openDock },
+        anything,
+      ),
+    ).toBe(slot.workCenterId)
+  })
+
+  /**
+   * A closed card draws one mark carrying a count. Refusing a drop on it until
+   * the planner has opened it and aimed at a row would make the dock decorative.
+   */
+  it('lands a drop on a closed card on that plant\'s best legal partner', () => {
+    const card = at(closedDock.cards, 0, 'card')
+    expect(card.slots).toHaveLength(0)
+    const point = { x: card.x + card.width / 2, y: card.y + card.height / 2 }
+    expect(resolveDropTarget(point, { nodes: layout.nodes, dock: closedDock }, anything)).toBe('R1')
+    // R1 is the heaviest partner, but it is not always the one that can take
+    // this load — the card resolves through legality, not through weight alone.
+    expect(
+      resolveDropTarget(point, { nodes: layout.nodes, dock: closedDock }, (id) => id === 'R3'),
+    ).toBe('R3')
+  })
+
+  it('still resolves a card whose partners are all refused, so the ghost can say why', () => {
+    const card = at(closedDock.cards, 0, 'card')
+    expect(
+      resolveDropTarget(
+        { x: card.x + 2, y: card.y + 2 },
+        { nodes: layout.nodes, dock: closedDock },
+        () => false,
+      ),
+    ).toBe('R1')
+  })
+
+  it('prefers a node to a card when the two overlap', () => {
+    const node = at(layout.nodes, 0, 'node')
+    const overlapping = layoutPartnerDock(dockInputs, {
+      gridBounds: { x: node.x - 400, y: node.y - 400, width: 400, height: 800 },
+    })
+    const target = resolveDropTarget(
+      { x: node.x, y: node.y },
+      { nodes: layout.nodes, dock: overlapping },
+      anything,
+    )
+    expect(target).toBe(node.id)
+  })
+})
+
+describe('pickDockCardTarget', () => {
+  const card = at(
+    layoutPartnerDock(
+      [
+        {
+          plantId: 'P2',
+          label: 'x',
+          partners: [
+            { workCenterId: 'R1', code: 'R1', weight: 9 },
+            { workCenterId: 'R2', code: 'R2', weight: 4 },
+          ],
+        },
+      ],
+      { gridBounds: { x: 0, y: 0, width: 100, height: 100 } },
+    ).cards,
+    0,
+    'card',
+  )
+
+  it('carries every partner, drawn or not', () => {
+    expect(card.partners).toEqual(['R1', 'R2'])
+    expect(card.slots).toHaveLength(0)
+  })
+
+  it('takes the strongest legal partner', () => {
+    expect(pickDockCardTarget(card, () => true)).toBe('R1')
+    expect(pickDockCardTarget(card, (id) => id === 'R2')).toBe('R2')
+  })
+
+  it('falls back to the strongest partner so a refusal is explained, not silent', () => {
+    expect(pickDockCardTarget(card, () => false)).toBe('R1')
   })
 })

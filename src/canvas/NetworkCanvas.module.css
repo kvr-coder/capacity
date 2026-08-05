@@ -187,9 +187,34 @@
   z-index: 4;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   max-width: min(460px, calc(100% - 28px));
   pointer-events: none;
+}
+
+/*
+ * The plant grid is fitted to fill its frame, so the HUD has nowhere empty to
+ * sit — it can only be made small enough that what it covers is the margin of
+ * the bottom-left group box rather than the machines inside it.
+ */
+.hud[data-level='plant'] {
+  gap: 5px;
+  /* Wide and two rows tall beats narrow and five rows tall: what the HUD
+     overlaps is a horizontal strip at the very bottom of the frame, and the
+     shallower that strip is, the fewer machines end up underneath it. */
+  max-width: calc(100% - 28px);
+}
+
+.hud[data-level='plant'] .edgeLegend {
+  align-items: center;
+  gap: 3px 14px;
+  padding: 6px 11px;
+}
+
+.hud[data-level='plant'] .legendHead {
+  width: auto;
+  flex: none;
+  gap: 12px;
 }
 
 /*
@@ -209,11 +234,19 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 12px;
-  padding: 8px 11px;
+  padding: 7px 11px;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-1);
+}
+
+.legendHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
 }
 
 .legendTitle {
@@ -224,6 +257,43 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+.legendHead .legendTitle {
+  width: auto;
+}
+
+/*
+ * The HUD is transparent to the pointer so it never steals a pan; the one
+ * control inside it takes its events back explicitly.
+ */
+.legendToggle {
+  flex: none;
+  padding: 3px 9px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.legendToggle:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
+.legendToggle[aria-pressed='true'] {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.legendToggle:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
 }
 
 .legendItem {

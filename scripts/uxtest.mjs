@@ -115,6 +115,47 @@ async function countElements(page) {
   })
 }
 
+/**
+ * Screen position of the work-center node carrying `code`, or null if it is
+ * not currently on screen. Used to catch a canvas PAN masquerading as a drag:
+ * a real load-move never has to move any node other than the ghost, so a
+ * third node drifting during the gesture means the whole stage scrolled.
+ */
+async function nodeAnchor(page, code) {
+  return page.evaluate((needle) => {
+    for (const el of Array.from(document.querySelectorAll('svg text, svg g'))) {
+      const t = (el.textContent || '').replace(/\s+/g, '')
+      if (!t.startsWith(needle)) continue
+      const r = el.getBoundingClientRect()
+      if (r.width < 4 || r.height < 4) continue
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    }
+    return null
+  }, code)
+}
+
+/**
+ * Whether the drag ghost is on screen mid-gesture. The ghost is the product's
+ * own "what is being moved" readout (DragGhost in DragLayer.tsx, the only
+ * role="status" element the canvas renders) — its presence is a live signal
+ * that a load-move gesture is in progress, not a pan.
+ *
+ * Its TEXT changes with what is under the pointer: "Drop on a work center…"
+ * before any target is hovered, replaced by a classification verdict
+ * ("Approved" / "Needs qualification" / "Needs retrofit" / "Drop refused")
+ * the moment a candidate is. Both are the ghost doing its job, so the
+ * presence check does not require a specific wording.
+ */
+async function readDragState(page) {
+  return page.evaluate(() => {
+    const status = document.querySelector('[role="status"]')
+    return {
+      ghostVisible: status !== null,
+      ghostText: status ? (status.textContent || '').trim().slice(0, 160) : null,
+    }
+  })
+}
+
 async function gotoRoute(page, hash, label) {
   await page.goto(`${BASE}/#${hash}`, { waitUntil: 'load' })
   await page.waitForTimeout(2200)
@@ -323,6 +364,140 @@ async function main() {
     record('Plant node clickable', false, 'no svg circle found to click')
   }
 
+  // --------------------------------------------------------- plant layer
+  //
+  // The plant layer is the screen this product is judged on, and it has two
+  // failure modes that a "did anything render?" check sails straight past: the
+  // work centers can be drawn correctly but too small to read, and the
+  // capability graph can bury them under hundreds of near-parallel curves.
+  // Both are measured here in rendered pixels rather than in element counts.
+  console.log('\nPLANT LAYER')
+  await page.evaluate(() => {
+    const circles = Array.from(document.querySelectorAll('[role="application"] svg circle'))
+    const biggest = circles.sort(
+      (a, b) => Number(b.getAttribute('r') || 0) - Number(a.getAttribute('r') || 0),
+    )[0]
+    biggest?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await page.waitForTimeout(2000)
+  await shot(page, 'plant-layer')
+
+  /** Where the plant's own work-center marks are, in stage pixels. */
+  const readPlant = () =>
+    page.evaluate(() => {
+      const app = document.querySelector('[role="application"]')
+      if (!app) return null
+      const stage = app.getBoundingClientRect()
+      const codes = Array.from(app.querySelectorAll('svg text'))
+        .filter((t) => /^[A-Z]{2}-[A-Z]{3}-WC\d{3}$/.test((t.textContent || '').trim()))
+        .map((t) => t.getBoundingClientRect())
+        .filter((b) => b.width > 0 && b.height > 0)
+      if (!codes.length) return { stage: { w: stage.width, h: stage.height }, count: 0 }
+      const left = Math.min(...codes.map((b) => b.left))
+      const right = Math.max(...codes.map((b) => b.right))
+      const top = Math.min(...codes.map((b) => b.top))
+      const bottom = Math.max(...codes.map((b) => b.bottom))
+      // The tallest glyph run in a node label — its rendered size, after the
+      // canvas transform, which is the only size a reader actually gets.
+      const glyph = Math.max(
+        ...Array.from(app.querySelectorAll('svg text tspan'))
+          .filter((t) => /^WC\d{3}$/.test((t.textContent || '').trim()))
+          .map((t) => t.getBoundingClientRect().height),
+        0,
+      )
+      const svgEdges = app.querySelectorAll('[class*="edgeGroup"] path').length
+      return {
+        stage: { w: stage.width, h: stage.height },
+        count: codes.length,
+        spanX: (right - left) / stage.width,
+        spanY: (bottom - top) / stage.height,
+        glyph,
+        svgEdges,
+        footer: document.querySelector('[class*="footerNote"]')?.textContent || '',
+      }
+    })
+
+  const plant = await readPlant()
+  if (plant && plant.count > 5) {
+    // Fitting to the off-plant satellites left the plant's own machines at
+    // roughly a third of the frame. They are the content; they get the frame.
+    record(
+      'The plant fills its frame with its own work centers',
+      plant.spanX > 0.6 && plant.spanY > 0.5,
+      `marks span ${(plant.spanX * 100).toFixed(0)}% x ${(plant.spanY * 100).toFixed(0)}% of the ` +
+        `${Math.round(plant.stage.w)}x${Math.round(plant.stage.h)} stage`,
+    )
+    // A label the reader has to zoom in to read conveys nothing at rest.
+    record(
+      'Work-center codes are legible without zooming',
+      plant.glyph >= 8,
+      `node code renders at ${plant.glyph.toFixed(1)}px tall`,
+    )
+    // Hundreds of dashed curves fanning to the other four plants is noise, not
+    // information. Nothing is hovered or selected here, so nothing is asked for.
+    record(
+      'Capability edges stay quiet until they are asked for',
+      plant.svgEdges <= 24,
+      `${plant.svgEdges} edge paths drawn with nothing selected`,
+    )
+    record(
+      'The other plants are docked rather than scattered',
+      /partner plants docked/.test(plant.footer),
+      plant.footer.trim() || 'no footer note',
+    )
+  } else {
+    record('Plant layer drew its work centers', false, `${plant ? plant.count : 0} codes found`)
+  }
+
+  // The toggle is the escape hatch, and it has to be a real, named control.
+  const showAll = page.getByRole('button', { name: /show all links/i })
+  if ((await showAll.count()) > 0) {
+    await showAll.click()
+    await page.waitForTimeout(900)
+    await shot(page, 'plant-all-links')
+    const opened = await readPlant()
+    const canvasEdges = await page.evaluate(
+      () => document.querySelectorAll('[role="application"] canvas').length,
+    )
+    record(
+      'Showing all capability links is one keyboard-reachable toggle away',
+      (opened && opened.svgEdges > (plant?.svgEdges ?? 0)) || canvasEdges > 0,
+      `${plant?.svgEdges ?? 0} -> ${opened ? opened.svgEdges : 0} svg edges, ${canvasEdges} edge canvas`,
+    )
+    const back = page.getByRole('button', { name: /show selected only/i })
+    if ((await back.count()) > 0) await back.click()
+    await page.waitForTimeout(500)
+  } else {
+    record('Capability edge toggle exists', false, 'no "show all links" button found')
+  }
+
+  // Anything clickable is operable by keyboard, and that includes the dock.
+  const nodeCount = Number((plant?.footer || '').match(/(\d+)\s+work centers/)?.[1] || 0)
+  if (nodeCount > 0) {
+    await page.evaluate(() => {
+      const stage = document.querySelector('[role="application"]')
+      if (stage instanceof HTMLElement) stage.focus()
+    })
+    const before = await page.evaluate(
+      () => ((document.getElementById('root')?.innerText || '').match(/[A-Z]{2}-[A-Z]{3}-WC\d{3}/g) || []).length,
+    )
+    // Tab walks every work center, then arrives at the first dock card.
+    for (let i = 0; i <= nodeCount; i += 1) await page.keyboard.press('Tab')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(800)
+    await shot(page, 'plant-dock-open')
+    const after = await page.evaluate(
+      () => ((document.getElementById('root')?.innerText || '').match(/[A-Z]{2}-[A-Z]{3}-WC\d{3}/g) || []).length,
+    )
+    record(
+      'The partner dock opens from the keyboard alone',
+      after > before,
+      `${before} -> ${after} work-center codes after Tab x${nodeCount + 1} then Enter`,
+    )
+  } else {
+    record('Plant footer reports its work-center count', false, plant?.footer || 'no footer note')
+  }
+
   // -------------------------------------------------------- work centers
   console.log('\nWORK CENTERS')
   const wc = await gotoRoute(page, '/workcenters', 'workcenters')
@@ -425,6 +600,156 @@ async function main() {
       await shot(page, 'ceiling-undone')
     } else {
       record('Undo control is available after a move', false, 'no enabled undo button found')
+    }
+  }
+
+  // ------------------------------------------------ drag load between machines
+  // The headline interaction of the whole product: drag a saturated work
+  // center's load onto one that can take it, with the move applying at once.
+  // Driven with real pointer events, not a synthesised click.
+  console.log('\nDRAG LOAD BETWEEN WORK CENTERS')
+  await page.goto(`${BASE}/#/network`, { waitUntil: 'load' })
+  await page.waitForTimeout(3000)
+
+  // Drill into a plant so work-center nodes are on screen.
+  const drilled = await page.evaluate(() => {
+    const circles = Array.from(document.querySelectorAll('svg circle'))
+    if (!circles.length) return false
+    const biggest = circles.sort(
+      (a, b) => Number(b.getAttribute('r') || 0) - Number(a.getAttribute('r') || 0),
+    )[0]
+    const r = biggest?.getBoundingClientRect()
+    if (!r) return false
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+  })
+  if (drilled && typeof drilled === 'object') {
+    await page.mouse.click(drilled.x, drilled.y)
+    await page.waitForTimeout(2500)
+  }
+
+  const nodeBoxes = await page.evaluate(() => {
+    // Work-center nodes carry their full code, e.g. CN-SUZ-WC005.
+    const out = []
+    for (const el of Array.from(document.querySelectorAll('svg text, svg g'))) {
+      const t = (el.textContent || '').replace(/\s+/g, '')
+      const m = t.match(/^[A-Z]{2}-[A-Z]{3}-WC\d{3}/)
+      if (!m) continue
+      const r = el.getBoundingClientRect()
+      if (r.width < 4 || r.height < 4) continue
+      if (out.some((o) => o.code === m[0])) continue
+      out.push({ code: m[0], x: r.x + r.width / 2, y: r.y + r.height / 2 })
+      if (out.length >= 12) break
+    }
+    return out
+  })
+  record('Plant layer exposes draggable work-center nodes', nodeBoxes.length >= 2, `${nodeBoxes.length} nodes located`)
+
+  if (nodeBoxes.length >= 2) {
+    const movesBefore = await page.evaluate(() => {
+      const t = document.getElementById('root')?.innerText || ''
+      const m = t.match(/(\d+)\s+moves?\s+on/i)
+      return m ? Number(m[1]) : 0
+    })
+    const src = nodeBoxes[0]
+    const dst = nodeBoxes[nodeBoxes.length - 1]
+    /** Where a node that is neither end of the drag sits, to catch a stray pan. */
+    const anchorBefore = await nodeAnchor(page, nodeBoxes[1].code)
+    await page.mouse.move(src.x, src.y)
+    await page.mouse.down()
+    // Move in steps so pointermove handlers see a genuine gesture.
+    for (let i = 1; i <= 12; i += 1) {
+      await page.mouse.move(
+        src.x + ((dst.x - src.x) * i) / 12,
+        src.y + ((dst.y - src.y) * i) / 12,
+      )
+      await page.waitForTimeout(30)
+    }
+    const inFlight = await readDragState(page)
+    const anchorDuring = await nodeAnchor(page, nodeBoxes[1].code)
+    await shot(page, 'drag-in-flight')
+    await page.mouse.up()
+    await page.waitForTimeout(3500)
+    await shot(page, 'drag-dropped')
+
+    // The regression this whole check exists to catch: pressing down on a
+    // node and dragging must pick up load, not pan the stage. A pan moves
+    // EVERY node, including ones that are neither end of the gesture.
+    const bystanderDrifted =
+      anchorBefore !== null &&
+      anchorDuring !== null &&
+      (Math.abs(anchorDuring.x - anchorBefore.x) > 6 || Math.abs(anchorDuring.y - anchorBefore.y) > 6)
+    record(
+      'The stage does not pan while dragging a node',
+      !bystanderDrifted,
+      anchorBefore === null || anchorDuring === null
+        ? `${nodeBoxes[1].code} left the viewport mid-drag`
+        : `bystander ${nodeBoxes[1].code} moved ${Math.round(anchorDuring.x - anchorBefore.x)},${Math.round(anchorDuring.y - anchorBefore.y)}px`,
+    )
+    record(
+      'A ghost shows what is being moved while dragging',
+      inFlight.ghostVisible && /work center|product group/i.test(inFlight.ghostText ?? ''),
+      inFlight.ghostVisible ? inFlight.ghostText : 'no role="status" drag ghost found mid-gesture',
+    )
+
+    const after = await page.evaluate(() => {
+      const t = document.getElementById('root')?.innerText || ''
+      const m = t.match(/(\d+)\s+moves?\s+on/i)
+      return { moves: m ? Number(m[1]) : 0, text: t }
+    })
+    // Strict: a pointer drag from one work center onto another must actually
+    // create a move. Accepting "the page mentions qualification somewhere"
+    // let a canvas PAN pass as a successful drag, which is exactly the bug
+    // this check exists to catch.
+    record(
+      'Dragging one work center onto another creates a move',
+      after.moves > movesBefore,
+      `moves ${movesBefore} -> ${after.moves}, dragged ${src.code} -> ${dst.code}`,
+    )
+  }
+
+  // ------------------------------------------------------- the OEE glide knob
+  console.log('\nOEE GLIDE')
+  await page.goto(`${BASE}/#/workcenters`, { waitUntil: 'load' })
+  await page.waitForTimeout(3000)
+  await page.evaluate(() => {
+    const row = document.querySelector('tbody tr')
+    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    row?.querySelector('button, [role="button"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await page.waitForTimeout(3000)
+
+  const oeePresent = await page.evaluate(() => {
+    const t = document.getElementById('root')?.innerText || ''
+    return /oee/i.test(t)
+  })
+  record('Work-center detail exposes the OEE knob', oeePresent, oeePresent ? 'OEE section present' : 'no OEE section found')
+
+  if (oeePresent) {
+    const before = await numericFingerprint(page)
+    // The glide end-value handle must be keyboard operable per the spec.
+    const knob = await page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll('[role="slider"], input[type="range"], [aria-valuenow]'),
+      )
+      const el = candidates.find((c) => {
+        const label = `${c.getAttribute('aria-label') || ''} ${c.getAttribute('name') || ''}`
+        return /oee|glide|ramp/i.test(label)
+      })
+      if (!el) return null
+      el.focus?.()
+      const r = el.getBoundingClientRect()
+      return { tag: el.tagName, x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    })
+    if (knob) {
+      for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowUp')
+      await page.waitForTimeout(3000)
+      const after = await numericFingerprint(page)
+      const changed = before.filter((v, i) => after[i] !== v).length
+      record('Turning the OEE knob re-runs the model', changed > 0, `${knob.tag}, ${changed} values changed`)
+      await shot(page, 'oee-glide')
+    } else {
+      record('OEE glide handle is keyboard reachable', false, 'no labelled slider/handle found in the OEE section')
+      await shot(page, 'oee-glide')
     }
   }
 

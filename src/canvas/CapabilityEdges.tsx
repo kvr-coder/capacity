@@ -232,17 +232,57 @@ const LEGEND: Array<{ basis: EdgeBasis; label: string; hint: string }> = [
   { basis: 'retrofit', label: 'Retrofit', hint: 'needs a priced change' },
 ]
 
+/**
+ * `focus` draws only the links belonging to the work center the reader is
+ * pointing at. `all` draws every link, bundled per partner plant and capped.
+ */
+export type EdgeMode = 'focus' | 'all'
+
 export interface EdgeLegendProps {
-  /** Edges the cull refused to draw. Named rather than silently dropped. */
+  mode: EdgeMode
+  onModeChange: (mode: EdgeMode) => void
+  /** Ropes actually drawn. */
+  drawn?: number
+  /** Underlying capability pairs behind those ropes. */
+  pairs?: number
+  /** Ropes the cap refused to draw. Named rather than silently dropped. */
   hidden?: number
-  total?: number
+  /** The work center whose links are showing, in `focus` mode. */
+  focusLabel?: string | null
 }
 
-/** Names every dash pattern, so the encoding is never left to be guessed. */
-export function CapabilityEdgeLegend({ hidden = 0, total = 0 }: EdgeLegendProps) {
+/**
+ * Names every dash pattern, and owns the one control that decides how much of
+ * the capability graph is on screen at all.
+ *
+ * The default is deliberately `focus`. Every work center in a plant shares
+ * capability with something somewhere, so "show everything" is several hundred
+ * near-parallel curves that bury the work centers they are drawn between. A link
+ * nobody asked for is not information; the toggle is here for the moment someone
+ * does ask.
+ */
+export function CapabilityEdgeLegend({
+  mode,
+  onModeChange,
+  drawn = 0,
+  pairs = 0,
+  hidden = 0,
+  focusLabel = null,
+}: EdgeLegendProps) {
+  const showingAll = mode === 'all'
   return (
     <div className={styles.edgeLegend}>
-      <span className={styles.legendTitle}>Shared capability</span>
+      <span className={styles.legendHead}>
+        <span className={styles.legendTitle}>Shared capability</span>
+        <button
+          type="button"
+          className={styles.legendToggle}
+          aria-pressed={showingAll}
+          onClick={() => onModeChange(showingAll ? 'focus' : 'all')}
+        >
+          {showingAll ? 'Show selected only' : 'Show all links'}
+        </button>
+      </span>
       {LEGEND.map((entry) => (
         <span key={entry.basis} className={styles.legendItem}>
           <svg
@@ -267,11 +307,14 @@ export function CapabilityEdgeLegend({ hidden = 0, total = 0 }: EdgeLegendProps)
           <span className={styles.legendHint}>{entry.hint}</span>
         </span>
       ))}
-      {hidden > 0 ? (
-        <span className={styles.legendHidden}>
-          {hidden.toLocaleString('en-US')} of {total.toLocaleString('en-US')} links not drawn
-        </span>
-      ) : null}
+      <span className={styles.legendHidden}>
+        {showingAll
+          ? `${drawn.toLocaleString('en-US')} ropes drawn for ${pairs.toLocaleString('en-US')} links` +
+            (hidden > 0 ? ` · ${hidden.toLocaleString('en-US')} ropes over the cap not drawn` : '')
+          : focusLabel === null
+            ? 'Hover or select a work center to trace its links.'
+            : `${focusLabel} · ${drawn.toLocaleString('en-US')} of ${pairs.toLocaleString('en-US')} links`}
+      </span>
     </div>
   )
 }

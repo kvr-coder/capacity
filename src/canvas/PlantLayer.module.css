@@ -4,6 +4,12 @@
  * Hairline chrome, one step of tone between the column band and the page, and
  * nothing coloured except the utilisation ring and the plant identity chips.
  * Every value here is a token.
+ *
+ * Font sizes are in WORLD units, not screen pixels: this layer is drawn inside
+ * the shared transform, so a size here is divided by the fit scale before it
+ * reaches an eye. The grid is fitted to itself and lands near k = 0.9 on a
+ * typical plant, which is where these numbers were chosen — a 16-unit code
+ * renders at ~14px, and the smallest text here stays above 9px.
  */
 
 .layer {
@@ -12,33 +18,49 @@
 
 /* --- stage columns ------------------------------------------------------- */
 
+/*
+ * The band is the sunken plane against the page plane — one designed step of
+ * tone, used at full strength so the column reads as a column in both themes
+ * rather than only in the light one, where the pair happens to be brighter.
+ */
 .columnBand {
   fill: var(--surface-sunken);
-  stroke: var(--border);
-  stroke-width: 1;
-  opacity: 0.7;
+  stroke: none;
 }
 
-.columnStage {
+.columnRule {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.columnIndex {
   fill: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.14em;
 }
 
 .columnLabel {
   fill: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: 19px;
+  font-weight: 640;
+  letter-spacing: 0.005em;
 }
 
 .columnCount {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.columnCountNote {
   fill: var(--text-muted);
   font-family: var(--font-sans);
   font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
 /* --- machine-class groups ------------------------------------------------ */
@@ -52,9 +74,9 @@
 .groupLabel {
   fill: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 10px;
-  font-weight: 560;
-  letter-spacing: 0.02em;
+  font-size: 12px;
+  font-weight: 580;
+  letter-spacing: 0.015em;
 }
 
 /* --- nodes --------------------------------------------------------------- */
@@ -82,25 +104,32 @@
   stroke-width: 1.5;
 }
 
-.classMonogram {
-  fill: var(--text-muted);
+/*
+ * The code is one text element on two lines. The plant prefix repeats on every
+ * node in the view, so it is quiet; the part that identifies the machine is
+ * loud. Both are ink, never a series colour.
+ */
+.nodeCode {
   font-family: var(--font-mono);
-  font-size: 7px;
-  letter-spacing: 0.12em;
 }
 
-.nodeCode {
+.nodePrefix {
+  fill: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.nodeName {
   fill: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 16px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
 }
 
 .nodeValue {
   fill: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 9px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -113,7 +142,7 @@
 .badgeText {
   fill: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -139,14 +168,24 @@
 .targetChipText {
   fill: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
+/*
+ * The node's hit target, and its drag handle. `touch-action: none` keeps a
+ * touch drag from being claimed by the browser as a page scroll mid-gesture;
+ * `grab` says out loud that the mark can be picked up, not only clicked.
+ */
 .hit {
   fill: transparent;
   pointer-events: auto;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+}
+
+.hit:active {
+  cursor: grabbing;
 }
 
 .node[data-state='selected'] .disc,
@@ -166,44 +205,96 @@
   }
 }
 
-/* --- satellites ---------------------------------------------------------- */
+/* --- partner dock -------------------------------------------------------- */
 
-.satellite {
+.dock {
   pointer-events: none;
 }
 
-.satellitePlate {
-  fill: var(--surface-2);
+.dockTitle {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.dockNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.dockPlate {
+  fill: var(--surface-1);
   stroke: var(--border);
   stroke-width: 1;
 }
 
-.satelliteLabel {
-  fill: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.satelliteDot {
-  fill: var(--surface-1);
+.dockCard[data-state='hovered'] .dockPlate,
+.dockCard[data-state='focused'] .dockPlate {
   stroke: var(--border-strong);
 }
 
-.satelliteSlotLabel {
-  fill: var(--text-secondary);
+.dockCode {
+  fill: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 15px;
+  font-weight: 620;
 }
 
-.satelliteSlot[data-legal='no'] {
-  opacity: 0.28;
+.dockCount {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
 }
 
-.satelliteOverflow {
+.dockChevron {
   fill: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 10px;
+  font-size: 11px;
+}
+
+.dockCardNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.dockFocusRing {
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+
+.dockSlot[data-legal='no'] {
+  opacity: 0.3;
+}
+
+.dockSlotActive {
+  fill: var(--surface-sunken);
+  stroke: none;
+}
+
+.dockDot {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+}
+
+.dockSlotLabel {
+  fill: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dockOverflow {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
 }
 
 /* --- empty state --------------------------------------------------------- */

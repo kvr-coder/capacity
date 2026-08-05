@@ -1101,12 +1101,19 @@ export function previewImpact(
 export interface StageNodeInput {
   id: WorkCenterId
   code: string
+  /**
+   * What the node face shows. Inside a plant view the plant prefix on every
+   * code is the same three characters repeated 150 times, so the caller strips
+   * it and the disc carries the part that differs. Defaults to `code`.
+   */
+  label?: string
   classId: MachineClassId
   className: string
   stage: number
 }
 
 export interface PlacedNode extends StageNodeInput {
+  label: string
   x: number
   y: number
   r: number
@@ -1127,7 +1134,11 @@ export interface StageColumn {
   label: string
   x: number
   width: number
+  /** Header band plus content. */
   height: number
+  /** Top of the first class group — everything above it is the column header. */
+  contentY: number
+  contentHeight: number
   groups: ClassGroup[]
   nodeCount: number
 }
@@ -1138,6 +1149,8 @@ export interface PlantLayout {
   byId: Map<WorkCenterId, PlacedNode>
   width: number
   height: number
+  /** Height of the column header band. 0 when there is nothing to draw. */
+  headerHeight: number
 }
 
 export interface StageLayoutOptions {
@@ -1150,16 +1163,29 @@ export interface StageLayoutOptions {
   groupPadding?: number
   /** Hard cap on nodes per row inside a class group. */
   maxPerRow?: number
+  /** Band above the first class group carrying the stage name and count. */
+  headerHeight?: number
 }
 
+/**
+ * Sized for a grid that is FITTED TO ITSELF rather than to a ring of context.
+ *
+ * A work center has to carry four things on its face — code, utilisation ring,
+ * utilisation value, binding-pool badge — and a 26px disc fitted alongside
+ * off-plant satellites left them at three or four screen pixels, which is a
+ * decoration rather than a label. These numbers are chosen so that a typical
+ * plant (five stages, ~30 work centers) lands near scale 0.75, where the disc is
+ * ~28 screen px and the code sits at ~11px: readable without touching the zoom.
+ */
 const STAGE_DEFAULTS: Required<StageLayoutOptions> = {
-  nodeRadius: 26,
-  gap: 16,
-  columnGap: 40,
-  groupGap: 22,
-  groupHeaderHeight: 20,
-  groupPadding: 12,
+  nodeRadius: 38,
+  gap: 14,
+  columnGap: 34,
+  groupGap: 14,
+  groupHeaderHeight: 17,
+  groupPadding: 9,
   maxPerRow: 3,
+  headerHeight: 46,
 }
 
 /**
@@ -1204,20 +1230,41 @@ export function layoutStageColumns(
       if (bucket) bucket.push(member)
       else byClass.set(member.classId, [member])
     }
-    const classIds = Array.from(byClass.keys()).sort()
+    // Groups stack down the column BIGGEST FLEET FIRST. Ranking by magnitude is
+    // the same rule every other ranked list in this app follows, and it puts the
+    // machines that carry most of the stage where the eye lands first; the
+    // one-offs settle at the bottom where they belong. Ties break on the class
+    // NAME — the string the reader can actually see — with the id only as a last
+    // resort, because ordering visible boxes by an invisible key is arbitrary
+    // dressed up as deterministic.
+    const classIds = Array.from(byClass.keys()).sort((a, b) => {
+      const left = byClass.get(a) ?? []
+      const right = byClass.get(b) ?? []
+      if (left.length !== right.length) return right.length - left.length
+      const leftName = left[0]?.className ?? a
+      const rightName = right[0]?.className ?? b
+      if (leftName !== rightName) return leftName < rightName ? -1 : 1
+      return a < b ? -1 : a > b ? 1 : 0
+    })
 
     // Column width is set by the widest class group, so every group in a column
     // shares one left edge and the column reads as a single band.
+    //
+    // The row width is the biggest class the column holds, capped. Sizing each
+    // group to be individually SQUARE — the obvious first instinct — is what
+    // makes a column of five three-machine classes eleven rows tall: every one
+    // of them wraps at two, and it is the COLUMN, not the group, that has to
+    // fit the frame. `layoutPlantGridFitted` chooses the cap.
     let perRow = 1
     for (const classId of classIds) {
       const count = (byClass.get(classId) ?? []).length
-      perRow = Math.max(perRow, Math.min(o.maxPerRow, Math.ceil(Math.sqrt(count))))
+      perRow = Math.max(perRow, Math.min(o.maxPerRow, count))
     }
     const innerWidth = perRow * pitch - o.gap
     const columnWidth = innerWidth + o.groupPadding * 2
 
     const groups: ClassGroup[] = []
-    let cursorY = 0
+    let cursorY = o.headerHeight
     let nodeCount = 0
     for (const classId of classIds) {
       const members2 = (byClass.get(classId) ?? []).slice().sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))
@@ -1241,6 +1288,7 @@ export function layoutStageColumns(
         const rowLeft = cursorX + o.groupPadding + (innerWidth - rowWidth) / 2
         const placed: PlacedNode = {
           ...member,
+          label: member.label ?? member.code,
           r: o.nodeRadius,
           x: rowLeft + column * pitch + o.nodeRadius,
           y: cursorY + o.groupPadding + o.groupHeaderHeight + row * pitch + o.nodeRadius,
@@ -1254,13 +1302,15 @@ export function layoutStageColumns(
       cursorY += groupHeight + o.groupGap
     }
 
-    const columnHeight = Math.max(0, cursorY - o.groupGap)
+    const columnHeight = Math.max(o.headerHeight, cursorY - o.groupGap)
     columns.push({
       stage,
       label: stageLabel.get(stage) ?? `Stage ${stage}`,
       x: cursorX,
       width: columnWidth,
       height: columnHeight,
+      contentY: o.headerHeight,
+      contentHeight: Math.max(0, columnHeight - o.headerHeight),
       groups,
       nodeCount,
     })
@@ -1274,122 +1324,322 @@ export function layoutStageColumns(
     byId,
     width: Math.max(0, cursorX - o.columnGap),
     height: maxHeight,
+    headerHeight: columns.length === 0 ? 0 : o.headerHeight,
   }
 }
 
-// ---------------------------------------------------------------------------
-// Satellites: the other four plants, ringed around the focused one
-// ---------------------------------------------------------------------------
-
-export interface SatelliteSlot {
-  workCenterId: WorkCenterId
-  code: string
-  x: number
-  y: number
-  r: number
-}
-
-export interface Satellite {
-  plantId: PlantId
-  label: string
-  /** Bundle hub — every edge into this satellite is pulled through here. */
-  x: number
-  y: number
-  angle: number
-  slots: SatelliteSlot[]
-  /** Siblings that exist but did not fit into `slots`. */
-  overflow: number
-}
-
-export interface SatelliteInput {
-  plantId: PlantId
-  label: string
-  siblings: Array<{ workCenterId: WorkCenterId; code: string; weight: number }>
-}
-
-export interface SatelliteOptions {
-  /** Bounding box of the focused plant's grid, in world units. */
-  bounds: { x: number; y: number; width: number; height: number }
-  /** Extra distance beyond the bounds ellipse, horizontally. */
-  orbit?: number
-  /**
-   * The vertical half of the orbit. Defaults to 70% of `orbit`: a stage grid is
-   * wide and short, and matching the orbit to it keeps the whole composition
-   * closer to the viewport's own aspect instead of stranding two satellites in
-   * empty space above and below.
-   */
-  orbitY?: number
-  slotRadius?: number
-  maxSlots?: number
-  /** Free space between two slot circles along the row. */
-  slotGap?: number
-  /** Distance from the hub out to the slot row. */
-  slotOffset?: number
+export interface PlantGridFitOptions extends StageLayoutOptions {
+  /** Stage the grid will be fitted into, in pixels, after the fit padding. */
+  available: { width: number; height: number }
+  /** World units the frame carries besides the grid — the dock and the margins. */
+  reservedWidth?: number
+  reservedHeight?: number
+  /** Packings to try. More per row is wider and shorter. */
+  candidates?: readonly number[]
 }
 
 /**
- * The other plants, placed on an ellipse around the focused plant's grid.
+ * The same packing, chosen for the frame it has to live in.
  *
- * Siblings in another plant have no position of their own in a plant view — the
- * view is one plant. Giving each remote plant a satellite gives every capability
- * edge a real destination and a natural bundle hub, so 150 edges collapse into
- * four legible ropes instead of a hairball.
+ * Three nodes per row is a good default and a bad rule: a plant whose stages are
+ * deep packs into a tall, narrow grid, and fitting a tall grid into a wide stage
+ * wastes the width and shrinks every mark to make the height agree. The stage's
+ * aspect is known at layout time, so the packing is simply chosen to be the one
+ * that comes out BIGGEST — which is the only thing the reader actually cares
+ * about — with the narrower packing winning ties so the choice is stable.
  */
-export function layoutSatellites(
-  inputs: readonly SatelliteInput[],
-  options: SatelliteOptions,
-): Satellite[] {
-  const orbit = options.orbit ?? 150
-  const slotRadius = options.slotRadius ?? 11
-  const maxSlots = options.maxSlots ?? 8
-  const slotGap = options.slotGap ?? 7
-  const slotOffset = options.slotOffset ?? 34
-  const cx = options.bounds.x + options.bounds.width / 2
-  const cy = options.bounds.y + options.bounds.height / 2
-  const orbitY = options.orbitY ?? orbit * 0.7
-  const rx = options.bounds.width / 2 + orbit
-  const ry = options.bounds.height / 2 + orbitY
-  const count = Math.max(1, inputs.length)
+export function layoutPlantGridFitted(
+  inputs: readonly StageNodeInput[],
+  stageLabel: ReadonlyMap<number, string>,
+  options: PlantGridFitOptions,
+): PlantLayout {
+  const { available, reservedWidth = 0, reservedHeight = 0, candidates = [2, 3, 4, 5], ...base } = options
+  let best: PlantLayout | null = null
+  let bestScale = Number.NEGATIVE_INFINITY
+  for (const maxPerRow of candidates) {
+    const layout = layoutStageColumns(inputs, stageLabel, { ...base, maxPerRow })
+    const width = Math.max(1, layout.width + reservedWidth)
+    const height = Math.max(1, layout.height + reservedHeight)
+    const scale = Math.min(available.width / width, available.height / height)
+    if (scale > bestScale + 1e-9) {
+      bestScale = scale
+      best = layout
+    }
+  }
+  return best ?? layoutStageColumns(inputs, stageLabel, base)
+}
 
-  return inputs.map((input, index) => {
-    // Start at -90deg so the first satellite sits above the grid, then walk
-    // clockwise. Deterministic: the same plant always lands in the same place.
-    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / count
-    const hubX = cx + Math.cos(angle) * rx
-    const hubY = cy + Math.sin(angle) * ry
-    const ranked = [...input.siblings].sort(
+// ---------------------------------------------------------------------------
+// Partner dock: the other plants, docked at the frame edge
+// ---------------------------------------------------------------------------
+
+export interface DockSlot {
+  workCenterId: WorkCenterId
+  code: string
+  /** Centre of the slot's dot. */
+  x: number
+  y: number
+  r: number
+  /** The row plate — the hit target and the focus ring both use it. */
+  rowX: number
+  rowY: number
+  rowWidth: number
+  rowHeight: number
+}
+
+export interface DockCard {
+  /** Stable focus id. Namespaced so it can never collide with a work-center id. */
+  id: string
+  plantId: PlantId
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Header band of the card — the part that is always drawn. */
+  headerHeight: number
+  /** Every partner in this plant, drawn or not. This is the count badge. */
+  count: number
+  expanded: boolean
+  slots: DockSlot[]
+  /**
+   * Every partner in this plant, strongest overlap first — including the ones
+   * the card had no room to draw. A drop on the card header lands on one of
+   * these, so the list cannot be narrowed to whatever happens to be visible.
+   */
+  partners: WorkCenterId[]
+  /** Partners the card had no room for. Named, never silently dropped. */
+  overflow: number
+  /** Where every edge into this plant lands. */
+  anchor: Point
+  /** Bundle hub — inboard of the anchor, so strands converge before arriving. */
+  hub: Point
+}
+
+export interface PartnerDock {
+  cards: DockCard[]
+  byPlant: Map<PlantId, DockCard>
+  /**
+   * The gutter the cards live in. Depends only on the grid and the card width,
+   * NEVER on what is expanded — the view is fitted to this, and a frame that
+   * changed when a card opened would re-fit the canvas under the reader.
+   */
+  gutter: Rect
+}
+
+export interface DockInput {
+  plantId: PlantId
+  label: string
+  partners: Array<{ workCenterId: WorkCenterId; code: string; weight: number }>
+}
+
+export interface DockOptions {
+  /** Bounding box of the focused plant's grid, in world units. */
+  gridBounds: Rect
+  /** Daylight between the grid's right edge and the gutter. */
+  gutterGap?: number
+  width?: number
+  /** The always-drawn part of a card. */
+  cardHeight?: number
+  rowHeight?: number
+  cardGap?: number
+  maxSlots?: number
+  /** Plants whose cards are open. Everything else shows a count badge only. */
+  expanded?: ReadonlySet<PlantId>
+  slotRadius?: number
+  padding?: number
+  /** Room reserved at the top of the gutter for the dock's own heading. */
+  headerInset?: number
+  /**
+   * Shrink `maxSlots` until every open card fits inside the gutter. Used while a
+   * move is in flight, when every card opens at once: a drop target below the
+   * bottom of the frame is a drop target nobody can reach, and growing the frame
+   * to hold them would rescale the canvas mid-drag.
+   */
+  fitExpandedToGutter?: boolean
+}
+
+const DOCK_DEFAULTS = {
+  gutterGap: 46,
+  width: 190,
+  cardHeight: 50,
+  rowHeight: 26,
+  cardGap: 14,
+  maxSlots: 6,
+  slotRadius: 5,
+  padding: 10,
+  headerInset: 58,
+} as const
+
+/**
+ * World the dock claims to the right of the grid: the gutter gap plus the card
+ * width. The grid's packing is chosen against the space that is LEFT, so this
+ * has to be knowable before either exists.
+ */
+export const DOCK_RESERVED_WIDTH = DOCK_DEFAULTS.gutterGap + DOCK_DEFAULTS.width
+
+/**
+ * The other plants, docked as a gutter down the right edge of the grid.
+ *
+ * A partner in another plant has no position in a plant view, and inventing one
+ * far out to the left and right — which is what an orbit does — spends most of
+ * the frame on context and drags every capability edge across the content to
+ * reach it. Docking instead gives each remote plant one card at the edge: the
+ * plant's permanent colour slot, its code, and a COUNT. Twenty individual dots
+ * carry no more information than the number twenty, and they cost twenty edges.
+ *
+ * A card opens on demand into its individual partners, so the detail is one
+ * keystroke away rather than always on. The gutter rectangle is deliberately
+ * independent of that state: the frame the canvas fits to must not move when a
+ * card is opened.
+ */
+export function layoutPartnerDock(inputs: readonly DockInput[], options: DockOptions): PartnerDock {
+  const o = { ...DOCK_DEFAULTS, ...options }
+  const expanded = options.expanded ?? new Set<PlantId>()
+  const x = o.gridBounds.x + o.gridBounds.width + o.gutterGap
+  const gutter: Rect = {
+    x,
+    y: o.gridBounds.y,
+    width: o.width,
+    height: Math.max(o.gridBounds.height, 1),
+  }
+  if (inputs.length === 0) return { cards: [], byPlant: new Map(), gutter }
+
+  // Hung from the top of the gutter, under the dock's heading, so the heading
+  // and the cards read as one block. Opening a card grows the stack downwards
+  // rather than sliding every other card up the screen.
+  let cursorY = o.gridBounds.y + o.headerInset
+
+  let maxSlots = o.maxSlots
+  if (o.fitExpandedToGutter === true) {
+    const open = inputs.filter((input) => expanded.has(input.plantId)).length
+    if (open > 0) {
+      const fixed =
+        o.headerInset + inputs.length * o.cardHeight + (inputs.length - 1) * o.cardGap + open * o.padding
+      // One row is held back for the "+N more" line, which always has to fit:
+      // a cap the reader cannot see is the same as a silent truncation.
+      const rows = Math.floor((gutter.height - fixed) / (open * o.rowHeight)) - 1
+      maxSlots = clamp(rows, 1, o.maxSlots)
+    }
+  }
+
+  const cards: DockCard[] = []
+  const byPlant = new Map<PlantId, DockCard>()
+  for (const input of inputs) {
+    const isOpen = expanded.has(input.plantId)
+    const ranked = [...input.partners].sort(
       (a, b) => b.weight - a.weight || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0),
     )
-    const shown = ranked.slice(0, maxSlots)
-    // Slots sit in a straight row just beyond the hub, perpendicular to the
-    // radius. A fan around the hub would need an orbit proportional to the slot
-    // count to stay collision-free; a row costs a fixed pitch and always reads
-    // as one group belonging to one plant.
-    const dirX = Math.cos(angle)
-    const dirY = Math.sin(angle)
-    const pitch = slotRadius * 2 + slotGap
-    const first = -((shown.length - 1) * pitch) / 2
-    const slots: SatelliteSlot[] = shown.map((sibling, slotIndex) => {
-      const along = first + slotIndex * pitch
+    const shown = isOpen ? ranked.slice(0, maxSlots) : []
+    const overflow = isOpen ? Math.max(0, ranked.length - shown.length) : 0
+    const rows = shown.length + (overflow > 0 ? 1 : 0)
+    const height = o.cardHeight + (rows > 0 ? rows * o.rowHeight + o.padding : 0)
+    const slots: DockSlot[] = shown.map((partner, index) => {
+      const rowY = cursorY + o.cardHeight + index * o.rowHeight
       return {
-        workCenterId: sibling.workCenterId,
-        code: sibling.code,
-        r: slotRadius,
-        // (-dirY, dirX) is the left normal of the outward direction.
-        x: hubX + dirX * slotOffset - dirY * along,
-        y: hubY + dirY * slotOffset + dirX * along,
+        workCenterId: partner.workCenterId,
+        code: partner.code,
+        r: o.slotRadius,
+        x: x + o.padding + o.slotRadius + 2,
+        y: rowY + o.rowHeight / 2,
+        rowX: x + 4,
+        rowY,
+        rowWidth: o.width - 8,
+        rowHeight: o.rowHeight,
       }
     })
-    return {
+    const anchor: Point = { x, y: cursorY + o.cardHeight / 2 }
+    const card: DockCard = {
+      id: `dock:${input.plantId}`,
       plantId: input.plantId,
       label: input.label,
-      x: hubX,
-      y: hubY,
-      angle,
+      x,
+      y: cursorY,
+      width: o.width,
+      height,
+      headerHeight: o.cardHeight,
+      count: ranked.length,
+      expanded: isOpen,
       slots,
-      overflow: Math.max(0, ranked.length - shown.length),
+      partners: ranked.map((partner) => partner.workCenterId),
+      overflow,
+      anchor,
+      // Far enough inboard that strands into one plant read as a single rope,
+      // close enough that the rope still points at its card.
+      hub: { x: x - o.gutterGap * 1.4, y: anchor.y },
     }
-  })
+    cards.push(card)
+    byPlant.set(card.plantId, card)
+    cursorY += height + o.cardGap
+  }
+
+  return { cards, byPlant, gutter }
+}
+
+// ---------------------------------------------------------------------------
+// Drop surfaces
+// ---------------------------------------------------------------------------
+
+/**
+ * The work center a drop at `world` lands on, or null for a drop on nothing.
+ *
+ * Three surfaces, in the order a reader would expect them to win: a node in the
+ * grid, a row inside an opened dock card, and finally the card itself. The card
+ * is a surface in its own right because a docked plant is drawn as ONE mark
+ * carrying a count — refusing a drop on it because the planner did not first
+ * open it and aim at a row would make the dock decorative.
+ *
+ * `isLegal` is what a card resolves through: a plant may have thirty partners
+ * and only four that can take this load, so the card lands on the strongest
+ * legal one rather than on whichever happens to sort first. When none is legal
+ * the card still resolves — to its best partner — so the ghost can say *why*
+ * the drop is refused instead of going quiet.
+ */
+export function resolveDropTarget(
+  world: Point,
+  surfaces: { nodes: readonly PlacedNode[]; dock: PartnerDock },
+  isLegal: (id: WorkCenterId) => boolean,
+  hitPadding = 6,
+): WorkCenterId | null {
+  for (const node of surfaces.nodes) {
+    if (Math.hypot(world.x - node.x, world.y - node.y) <= node.r + hitPadding) return node.id
+  }
+  for (const card of surfaces.dock.cards) {
+    for (const slot of card.slots) {
+      if (
+        world.x >= slot.rowX &&
+        world.x <= slot.rowX + slot.rowWidth &&
+        world.y >= slot.rowY &&
+        world.y <= slot.rowY + slot.rowHeight
+      ) {
+        return slot.workCenterId
+      }
+    }
+  }
+  for (const card of surfaces.dock.cards) {
+    if (
+      world.x >= card.x &&
+      world.x <= card.x + card.width &&
+      world.y >= card.y &&
+      world.y <= card.y + card.height
+    ) {
+      return pickDockCardTarget(card, isLegal)
+    }
+  }
+  return null
+}
+
+/**
+ * Which partner a drop on a docked plant's card means. Strongest legal partner
+ * first; failing that the strongest partner at all, so the refusal is explained
+ * rather than silent. Null only when the plant has no partners to speak of.
+ */
+export function pickDockCardTarget(
+  card: DockCard,
+  isLegal: (id: WorkCenterId) => boolean,
+): WorkCenterId | null {
+  for (const id of card.partners) if (isLegal(id)) return id
+  return card.partners[0] ?? null
 }
 
 // ---------------------------------------------------------------------------

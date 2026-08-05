@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clamp } from '@/domain/lookup'
 import type { Point } from '@/canvas/projection'
 import type { Rect } from '@/canvas/layout'
+import { gestureFor } from '@/canvas/gesture'
 
 export interface Transform {
   x: number
@@ -308,9 +309,12 @@ export function useCanvasTransform(options: CanvasTransformOptions): CanvasTrans
 
   const onPointerDown = useCallback(
     (event: React.PointerEvent<Element>) => {
-      // Only a background drag pans; a drag that starts on a node belongs to the
-      // move interaction and stops propagating before it reaches here.
-      if (event.button !== 0 && event.pointerType === 'mouse') return
+      // Which gesture this is was decided the instant the pointer went down, by
+      // what it landed on. A press on a drag handle belongs to the move
+      // interaction and must not also pan — and asking the DOM directly is what
+      // makes that true for every mark, not only the ones that remembered to
+      // stop propagation on their way past.
+      if (gestureFor(event) !== 'pan') return
       stopAnimation()
       dragRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY }
       setPanning(true)

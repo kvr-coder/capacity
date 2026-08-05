@@ -22,9 +22,11 @@
  *   - **drop legality**, during a drag, is a status ring *and* an icon *and* a
  *     label on the active target.
  *
- * The four other plants ring the grid as satellites. A sibling in another plant
- * has no position in a plant view, so it is given one — which also gives every
- * capability edge a real destination and a natural bundle hub.
+ * The other plants are DOCKED down the right edge rather than orbited around the
+ * grid. A partner in another plant has no position here; giving it one far away
+ * spends the frame on context and drags every capability edge across the
+ * content. One card per plant — its permanent colour slot, its code, its count —
+ * opens on demand into the individual partners.
  */
 
 import { memo } from 'react'
@@ -32,8 +34,16 @@ import type { PlantId, WorkCenterId } from '@/domain/types'
 import type { SeriesSlot } from '@/charts/types'
 import { pct } from '@/lib/format'
 import { divergingColor, seriesColor, statusColor } from '@/charts/palette'
-import type { DropClassification, PlacedNode, PlantLayout, Satellite, WorkCenterAggregate } from '@/canvas/layout'
+import type {
+  DockCard,
+  DropClassification,
+  PartnerDock,
+  PlacedNode,
+  PlantLayout,
+  WorkCenterAggregate,
+} from '@/canvas/layout'
 import { utilisationSignal } from '@/canvas/layout'
+import { DRAG_HANDLE_ATTRIBUTE } from '@/canvas/gesture'
 import { DropIconMark } from '@/canvas/DragLayer'
 import styles from '@/canvas/PlantLayer.module.css'
 
@@ -50,20 +60,20 @@ export interface WorkCenterNodeView {
 export interface PlantLayerProps {
   layout: PlantLayout
   nodes: readonly WorkCenterNodeView[]
-  satellites: readonly Satellite[]
+  dock: PartnerDock
   slotOfPlant: (id: PlantId) => SeriesSlot
   plantCodeOf: (id: PlantId) => string
   codeOf: (id: WorkCenterId) => string
   selectedId?: WorkCenterId | undefined
-  focusedId?: WorkCenterId | null
-  hoveredId?: WorkCenterId | null
+  focusedId?: string | null
+  hoveredId?: string | null
   /** Present only while a move is in flight. Every legal target lights up. */
   dropTargets?: ReadonlyMap<WorkCenterId, DropClassification> | null
   activeTargetId?: WorkCenterId | null
   dragSourceId?: WorkCenterId | null
   /** Projected utilisation during a drag, before the worker confirms. */
   previewUtilisation?: ReadonlyMap<WorkCenterId, number>
-  onHover: (id: WorkCenterId | null) => void
+  onHover: (id: string | null) => void
   /**
    * A single click, or Enter on the focused node: selects the work center *and*
    * opens its layer. A press that turned into a drag is filtered out upstream,
@@ -71,11 +81,13 @@ export interface PlantLayerProps {
    */
   onActivate: (id: WorkCenterId, event: { clientX: number; clientY: number }) => void
   onNodePointerDown: (id: WorkCenterId, event: React.PointerEvent<Element>) => void
+  /** Opening a dock card is a disclosure, not a navigation. */
+  onDockToggle: (plantId: PlantId) => void
   emptyMessage?: string
 }
 
 function ringGeometry(radius: number, utilisation: number): { r: number; circumference: number; offset: number } {
-  const r = radius - 3
+  const r = radius - 4
   const circumference = 2 * Math.PI * r
   const filled = Math.max(0, Math.min(utilisation, RING_FULL)) / RING_FULL
   return { r, circumference, offset: circumference * (1 - filled) }
@@ -84,7 +96,7 @@ function ringGeometry(radius: number, utilisation: number): { r: number; circumf
 export const PlantLayer = memo(function PlantLayer({
   layout,
   nodes,
-  satellites,
+  dock,
   slotOfPlant,
   plantCodeOf,
   codeOf,
@@ -98,6 +110,7 @@ export const PlantLayer = memo(function PlantLayer({
   onHover,
   onActivate,
   onNodePointerDown,
+  onDockToggle,
   emptyMessage = 'No work centers match the current filter.',
 }: PlantLayerProps) {
   if (layout.nodes.length === 0) {
@@ -123,22 +136,33 @@ export const PlantLayer = memo(function PlantLayer({
         {layout.columns.map((column) => (
           <g key={column.stage}>
             <rect
-              x={column.x - 10}
-              y={-52}
-              width={column.width + 20}
-              height={column.height + 68}
-              rx={14}
+              x={column.x}
+              y={0}
+              width={column.width}
+              height={column.height}
+              rx={10}
               className={styles.columnBand}
             />
-            <text className={styles.columnStage} x={column.x} y={-32}>
+            <text className={styles.columnIndex} x={column.x + 12} y={19}>
               {String(column.stage).padStart(2, '0')}
             </text>
-            <text className={styles.columnLabel} x={column.x} y={-14}>
+            <text className={styles.columnLabel} x={column.x + 12} y={38}>
               {column.label}
             </text>
-            <text className={styles.columnCount} x={column.x + column.width} y={-14} textAnchor="end">
+            <text className={styles.columnCount} x={column.x + column.width - 12} y={38} textAnchor="end">
               {column.nodeCount}
             </text>
+            <text className={styles.columnCountNote} x={column.x + column.width - 12} y={19} textAnchor="end">
+              {column.nodeCount === 1 ? 'work center' : 'work centers'}
+            </text>
+            <line
+              x1={column.x + 12}
+              x2={column.x + column.width - 12}
+              y1={column.contentY - 8}
+              y2={column.contentY - 8}
+              className={styles.columnRule}
+              vectorEffect="non-scaling-stroke"
+            />
           </g>
         ))}
       </g>
@@ -153,10 +177,10 @@ export const PlantLayer = memo(function PlantLayer({
                 y={group.y}
                 width={group.width}
                 height={group.height}
-                rx={10}
+                rx={9}
                 className={styles.groupBox}
               />
-              <text className={styles.groupLabel} x={group.x + 11} y={group.y + 15}>
+              <text className={styles.groupLabel} x={group.x + 11} y={group.y + 14}>
                 {group.className}
               </text>
             </g>
@@ -164,82 +188,8 @@ export const PlantLayer = memo(function PlantLayer({
         )}
       </g>
 
-      {/* --- satellites: the other plants ---------------------------------- */}
-      <g>
-        {satellites.map((satellite) => {
-          const identity = seriesColor(slotOfPlant(satellite.plantId))
-          const code = plantCodeOf(satellite.plantId)
-          return (
-            <g key={satellite.plantId} className={styles.satellite}>
-              <rect
-                x={satellite.x - 30}
-                y={satellite.y - 13}
-                width={60}
-                height={26}
-                rx={13}
-                className={styles.satellitePlate}
-              />
-              <rect x={satellite.x - 21} y={satellite.y - 4} width={8} height={8} rx={2} fill={identity} />
-              <text className={styles.satelliteLabel} x={satellite.x - 8} y={satellite.y + 4}>
-                {code}
-              </text>
-              {satellite.slots.map((slot) => {
-                const classification = dropTargets?.get(slot.workCenterId)
-                const isTarget = activeTargetId === slot.workCenterId
-                return (
-                  <g
-                    key={slot.workCenterId}
-                    className={styles.satelliteSlot}
-                    data-legal={dragging ? (classification?.allowed === true ? 'yes' : 'no') : undefined}
-                  >
-                    <circle
-                      cx={slot.x}
-                      cy={slot.y}
-                      r={slot.r}
-                      className={styles.satelliteDot}
-                      stroke={
-                        classification !== undefined && classification.allowed
-                          ? statusColor(classification.status)
-                          : undefined
-                      }
-                      strokeWidth={classification !== undefined && classification.allowed ? 2 : 1}
-                    />
-                    <text className={styles.satelliteSlotLabel} x={slot.x} y={slot.y + 3} textAnchor="middle">
-                      {slot.code.slice(-3)}
-                    </text>
-                    {isTarget && classification !== undefined ? (
-                      <g transform={`translate(${slot.x + slot.r + 4},${slot.y - slot.r - 4})`}>
-                        <DropIconMark icon={classification.icon} status={classification.status} size={16} />
-                      </g>
-                    ) : null}
-                    <circle
-                      cx={slot.x}
-                      cy={slot.y}
-                      r={slot.r + 8}
-                      className={styles.hit}
-                      onPointerEnter={() => onHover(slot.workCenterId)}
-                      onPointerLeave={() => onHover(null)}
-                      onClick={(event) => onActivate(slot.workCenterId, event)}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                    >
-                      <title>{`${slot.code} — ${code}. Shares capability with this plant. Click to open it.`}</title>
-                    </circle>
-                  </g>
-                )
-              })}
-              {satellite.overflow > 0 ? (
-                <text className={styles.satelliteOverflow} x={satellite.x} y={satellite.y + 30} textAnchor="middle">
-                  {`+${satellite.overflow} more`}
-                </text>
-              ) : null}
-            </g>
-          )
-        })}
-      </g>
-
       {/* --- work centers -------------------------------------------------- */}
-      <g>
-        {nodes.map((view) => {
+      {nodes.map((view) => {
           const { node, aggregate } = view
           const classification = dropTargets?.get(node.id)
           const isSource = dragSourceId === node.id
@@ -262,7 +212,7 @@ export const PlantLayer = memo(function PlantLayer({
               <circle r={node.r} className={styles.disc} />
               {view.proposed ? (
                 <circle
-                  r={node.r + 4}
+                  r={node.r + 5}
                   fill="none"
                   className={styles.proposedRing}
                   strokeDasharray="3 4"
@@ -270,33 +220,47 @@ export const PlantLayer = memo(function PlantLayer({
                 />
               ) : null}
 
-              <circle r={ring.r} fill="none" className={styles.ringTrack} strokeWidth={5} />
+              <circle r={ring.r} fill="none" className={styles.ringTrack} strokeWidth={6} />
               <circle
                 r={ring.r}
                 fill="none"
                 className={styles.ringValue}
                 stroke={divergingColor(utilisationSignal(utilisation))}
-                strokeWidth={5}
+                strokeWidth={6}
                 strokeLinecap="round"
                 strokeDasharray={ring.circumference}
                 strokeDashoffset={ring.offset}
                 transform="rotate(-90)"
               />
 
-              <text className={styles.classMonogram} y={-11} textAnchor="middle">
-                {monogram(node.className)}
+              {/*
+                One text element, two lines. The plant prefix is the same seven
+                characters on every node in the view, so it is set quiet and the
+                part that actually distinguishes one machine from another is set
+                loud — but the code stays WHOLE, because a planner types it into
+                SAP and reads it out in a meeting, and a code that is only
+                complete inside a tooltip is a code they cannot use.
+
+                Machine class is not repeated here: the labelled group box
+                immediately above every node already names it in full, which is
+                strictly more than a two-letter monogram was saying.
+              */}
+              <text className={styles.nodeCode} textAnchor="middle">
+                <tspan className={styles.nodePrefix} x={0} y={-8}>
+                  {prefixOf(codeOf(node.id), node.label)}
+                </tspan>
+                <tspan className={styles.nodeName} x={0} dy={15}>
+                  {node.label}
+                </tspan>
               </text>
-              <text className={styles.nodeCode} y={1} textAnchor="middle">
-                {node.code}
-              </text>
-              <text className={styles.nodeValue} y={12} textAnchor="middle">
+              <text className={styles.nodeValue} y={22} textAnchor="middle">
                 {pct(utilisation, 0)}
               </text>
 
               {view.labourBound ? (
-                <g transform={`translate(${node.r - 6},${node.r - 6})`} className={styles.badge}>
-                  <rect x={-8} y={-7} width={16} height={14} rx={4} className={styles.badgePlate} />
-                  <text className={styles.badgeText} y={4} textAnchor="middle">
+                <g transform={`translate(${node.r - 9},${node.r - 9})`} className={styles.badge}>
+                  <rect x={-9} y={-8} width={18} height={16} rx={5} className={styles.badgePlate} />
+                  <text className={styles.badgeText} y={5} textAnchor="middle">
                     L
                   </text>
                   <title>Labour bound — the labour pool saturates before the machine pool.</title>
@@ -305,7 +269,7 @@ export const PlantLayer = memo(function PlantLayer({
 
               {selected || focused ? (
                 <circle
-                  r={node.r + 8}
+                  r={node.r + 9}
                   fill="none"
                   className={styles.focusRing}
                   strokeDasharray="4 4"
@@ -314,43 +278,50 @@ export const PlantLayer = memo(function PlantLayer({
               ) : null}
 
               {isSource ? (
-                <circle r={node.r + 8} fill="none" className={styles.sourceRing} vectorEffect="non-scaling-stroke" />
+                <circle r={node.r + 9} fill="none" className={styles.sourceRing} vectorEffect="non-scaling-stroke" />
               ) : null}
 
               {classification !== undefined && classification.allowed && !isSource ? (
                 <>
                   <circle
-                    r={node.r + 7}
+                    r={node.r + 8}
                     fill="none"
                     stroke={statusColor(classification.status)}
                     strokeWidth={isTarget ? 3 : 2}
                     opacity={isTarget ? 1 : 0.7}
                   />
-                  <g transform={`translate(${node.r + 3},${-node.r - 3})`}>
-                    <DropIconMark icon={classification.icon} status={classification.status} size={16} />
+                  <g transform={`translate(${node.r + 4},${-node.r - 4})`}>
+                    <DropIconMark icon={classification.icon} status={classification.status} size={18} />
                   </g>
                 </>
               ) : null}
 
               {isTarget && classification !== undefined ? (
-                <g transform={`translate(0,${-node.r - 22})`} className={styles.targetChip}>
+                <g transform={`translate(0,${-node.r - 26})`} className={styles.targetChip}>
                   <rect
-                    x={-classification.label.length * 3.4 - 10}
-                    y={-11}
-                    width={classification.label.length * 6.8 + 20}
-                    height={20}
-                    rx={10}
+                    x={-classification.label.length * 3.7 - 11}
+                    y={-12}
+                    width={classification.label.length * 7.4 + 22}
+                    height={22}
+                    rx={11}
                     className={styles.targetChipPlate}
                   />
-                  <text className={styles.targetChipText} y={3} textAnchor="middle">
+                  <text className={styles.targetChipText} y={4} textAnchor="middle">
                     {classification.label}
                   </text>
                 </g>
               ) : null}
 
+              {/*
+                The drag handle. `data-canvas-drag` is what tells the pan, at
+                pointerdown, that this press is not its gesture — the pan reads
+                the DOM rather than trusting that every mark on the way past
+                remembered to stop propagation.
+              */}
               <circle
                 r={node.r + 6}
                 className={styles.hit}
+                {...{ [DRAG_HANDLE_ATTRIBUTE]: 'workCenter' }}
                 onPointerEnter={() => onHover(node.id)}
                 onPointerLeave={() => onHover(null)}
                 onPointerDown={(event) => onNodePointerDown(node.id, event)}
@@ -361,21 +332,206 @@ export const PlantLayer = memo(function PlantLayer({
                   {`${codeOf(node.id)} — ${node.className}. ${pct(aggregate?.utilisation ?? 0, 0)} of ceiling` +
                     `${view.labourBound ? ', labour bound' : ', machine bound'}` +
                     `${classification !== undefined ? `. ${classification.label}: ${classification.detail}` : ''}` +
-                    '. Click to open it.'}
+                    '. Drag it onto another work center to move its load; click to open it.'}
                 </title>
               </circle>
             </g>
           )
         })}
-      </g>
+
+      {/* --- the partner dock ---------------------------------------------- */}
+      {dock.cards.length > 0 ? (
+        <g className={styles.dock}>
+          <text className={styles.dockTitle} x={dock.gutter.x} y={19}>
+            Shares capability
+          </text>
+          <text className={styles.dockNote} x={dock.gutter.x} y={38}>
+            {dock.cards.length === 1 ? '1 other plant' : `${dock.cards.length} other plants`}
+          </text>
+          {dock.cards.map((card) => (
+            <DockCardMark
+              key={card.id}
+              card={card}
+              identity={seriesColor(slotOfPlant(card.plantId))}
+              plantCode={plantCodeOf(card.plantId)}
+              focusedId={focusedId}
+              hoveredId={hoveredId}
+              dragging={dragging}
+              dropTargets={dropTargets}
+              activeTargetId={activeTargetId}
+              onHover={onHover}
+              onToggle={onDockToggle}
+              onActivate={onActivate}
+            />
+          ))}
+        </g>
+      ) : null}
     </g>
   )
 })
 
-/** Two letters standing in for a machine class, so the node carries its family. */
-function monogram(className: string): string {
-  const words = className.trim().split(/[\s-]+/).filter(Boolean)
-  if (words.length === 0) return '··'
-  if (words.length === 1) return words[0]?.slice(0, 2).toUpperCase() ?? '··'
-  return `${words[0]?.charAt(0) ?? ''}${words[1]?.charAt(0) ?? ''}`.toUpperCase()
+// ---------------------------------------------------------------------------
+// Dock card
+// ---------------------------------------------------------------------------
+
+interface DockCardMarkProps {
+  card: DockCard
+  /** The plant's permanent categorical slot. Never assigned by array position. */
+  identity: string
+  plantCode: string
+  focusedId?: string | null
+  hoveredId?: string | null
+  dragging: boolean
+  dropTargets?: ReadonlyMap<WorkCenterId, DropClassification> | null
+  activeTargetId?: WorkCenterId | null
+  onHover: (id: string | null) => void
+  onToggle: (plantId: PlantId) => void
+  onActivate: (id: WorkCenterId, event: { clientX: number; clientY: number }) => void
+}
+
+function DockCardMark({
+  card,
+  identity,
+  plantCode,
+  focusedId,
+  hoveredId,
+  dragging,
+  dropTargets,
+  activeTargetId,
+  onHover,
+  onToggle,
+  onActivate,
+}: DockCardMarkProps) {
+  const focused = focusedId === card.id
+  const hovered = hoveredId === card.id
+  const label = `${plantCode}, ${card.count} work ${card.count === 1 ? 'center' : 'centers'} sharing capability. ${
+    card.expanded ? 'Open — Enter closes it.' : 'Enter opens the list.'
+  }`
+
+  return (
+    <g className={styles.dockCard} data-state={focused ? 'focused' : hovered ? 'hovered' : undefined}>
+      <rect
+        x={card.x}
+        y={card.y}
+        width={card.width}
+        height={card.height}
+        rx={10}
+        className={styles.dockPlate}
+      />
+      {/* The colour sits BESIDE the text, never on it. */}
+      <rect x={card.x + 12} y={card.y + 17} width={10} height={10} rx={2.5} fill={identity} />
+      <text className={styles.dockCode} x={card.x + 29} y={card.y + 26}>
+        {plantCode}
+      </text>
+      <text className={styles.dockCount} x={card.x + card.width - 26} y={card.y + 27} textAnchor="end">
+        {card.count}
+      </text>
+      <text className={styles.dockChevron} x={card.x + card.width - 12} y={card.y + 27} textAnchor="end">
+        {card.expanded ? '▾' : '▸'}
+      </text>
+      <text className={styles.dockCardNote} x={card.x + 29} y={card.y + 40}>
+        {card.expanded ? 'linked work centers' : 'linked'}
+      </text>
+
+      {focused ? (
+        <rect
+          x={card.x - 4}
+          y={card.y - 4}
+          width={card.width + 8}
+          height={card.headerHeight + 8}
+          rx={12}
+          fill="none"
+          className={styles.dockFocusRing}
+          strokeDasharray="4 4"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+
+      <rect
+        x={card.x}
+        y={card.y}
+        width={card.width}
+        height={card.headerHeight}
+        rx={10}
+        className={styles.hit}
+        onPointerEnter={() => onHover(card.id)}
+        onPointerLeave={() => onHover(null)}
+        onClick={() => onToggle(card.plantId)}
+        onDoubleClick={(event) => event.stopPropagation()}
+      >
+        <title>{label}</title>
+      </rect>
+
+      {card.slots.map((slot) => {
+        const classification = dropTargets?.get(slot.workCenterId)
+        const isTarget = activeTargetId === slot.workCenterId
+        const slotFocused = focusedId === slot.workCenterId
+        return (
+          <g
+            key={slot.workCenterId}
+            className={styles.dockSlot}
+            data-legal={dragging ? (classification?.allowed === true ? 'yes' : 'no') : undefined}
+          >
+            {slotFocused || isTarget ? (
+              <rect
+                x={slot.rowX}
+                y={slot.rowY + 1}
+                width={slot.rowWidth}
+                height={slot.rowHeight - 2}
+                rx={7}
+                className={styles.dockSlotActive}
+              />
+            ) : null}
+            <circle
+              cx={slot.x}
+              cy={slot.y}
+              r={slot.r}
+              className={styles.dockDot}
+              stroke={
+                classification !== undefined && classification.allowed ? statusColor(classification.status) : undefined
+              }
+              strokeWidth={classification !== undefined && classification.allowed ? 2 : 1}
+            />
+            <text className={styles.dockSlotLabel} x={slot.x + 12} y={slot.y + 4}>
+              {slot.code}
+            </text>
+            {isTarget && classification !== undefined ? (
+              <g transform={`translate(${slot.rowX + slot.rowWidth - 12},${slot.y})`}>
+                <DropIconMark icon={classification.icon} status={classification.status} size={16} />
+              </g>
+            ) : null}
+            <rect
+              x={slot.rowX}
+              y={slot.rowY}
+              width={slot.rowWidth}
+              height={slot.rowHeight}
+              rx={7}
+              className={styles.hit}
+              onPointerEnter={() => onHover(slot.workCenterId)}
+              onPointerLeave={() => onHover(null)}
+              onClick={(event) => onActivate(slot.workCenterId, event)}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
+              <title>{`${slot.code} — ${plantCode}. Shares capability with this plant. Click to open it.`}</title>
+            </rect>
+          </g>
+        )
+      })}
+
+      {card.overflow > 0 ? (
+        <text
+          className={styles.dockOverflow}
+          x={card.x + 17}
+          y={card.y + card.headerHeight + card.slots.length * 26 + 15}
+        >
+          {`+${card.overflow} more not shown`}
+        </text>
+      ) : null}
+    </g>
+  )
+}
+
+/** The part of the code the short label dropped — normally `US-TOL-`. */
+function prefixOf(code: string, label: string): string {
+  return code.endsWith(label) ? code.slice(0, code.length - label.length) : ''
 }

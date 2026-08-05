@@ -28,6 +28,7 @@ export type { PlantLayerProps, WorkCenterNodeView } from '@/canvas/PlantLayer'
 
 export {
   WORK_CENTER_FOCUS,
+  WORK_CENTER_MAX_RELIEF,
   WORK_CENTER_WORLD,
   WorkCenterLayer,
   collapseDowntime,
@@ -41,13 +42,23 @@ export {
   CapabilityEdgesSvg,
   EDGE_CANVAS_THRESHOLD,
 } from '@/canvas/CapabilityEdges'
-export type { EdgeCanvasProps, EdgeLayerProps, EdgeLegendProps } from '@/canvas/CapabilityEdges'
+export type { EdgeCanvasProps, EdgeLayerProps, EdgeLegendProps, EdgeMode } from '@/canvas/CapabilityEdges'
 
 export { AppliedMoveCard, DragGhost, DragLayer, DropIconBadge, DropIconMark } from '@/canvas/DragLayer'
 export type { AppliedMoveCardProps, DragGhostProps, DragLayerProps, DropIconMarkProps } from '@/canvas/DragLayer'
 
 export { IDENTITY, TRANSITION_MS, useCanvasTransform } from '@/canvas/useCanvasTransform'
 export type { CanvasTransformApi, CanvasTransformOptions, Transform } from '@/canvas/useCanvasTransform'
+
+export {
+  DRAG_HANDLE_ATTRIBUTE,
+  DRAG_HANDLE_SELECTOR,
+  DRAG_THRESHOLD_PX,
+  dragHandleKindAt,
+  gestureFor,
+  passedThreshold,
+} from '@/canvas/gesture'
+export type { DragHandleKind, GestureInput, GestureKind, GestureTarget } from '@/canvas/gesture'
 
 export { useDragMove } from '@/canvas/useDragMove'
 export type { AppliedMove, DragMeta, DragMoveApi, DragMoveOptions, DragPayload } from '@/canvas/useDragMove'
@@ -68,6 +79,7 @@ export {
 export type { GeoPoint, GraticuleLine, LandRegion, PathOptions, Point, ProjectionBox, Ring } from '@/canvas/projection'
 
 export {
+  DOCK_RESERVED_WIDTH,
   EDGE_BUNDLE_STRENGTH,
   aggregatePlants,
   aggregateWorkCenters,
@@ -83,11 +95,14 @@ export {
   layoutArcs,
   layoutGhostFan,
   layoutGlobe,
-  layoutSatellites,
+  layoutPartnerDock,
+  layoutPlantGridFitted,
   layoutStageColumns,
   layoutStrip,
+  pickDockCardTarget,
   placeGlobeLabels,
   previewImpact,
+  resolveDropTarget,
   utilisationSignal,
 } from '@/canvas/layout'
 export type {
@@ -99,6 +114,10 @@ export type {
   ClassifyDropArgs,
   ClassGroup,
   CullResult,
+  DockCard,
+  DockInput,
+  DockOptions,
+  DockSlot,
   DropBasis,
   DropClassification,
   DropIcon,
@@ -113,14 +132,12 @@ export type {
   LabelPlacement,
   LabelSide,
   LabelTarget,
+  PartnerDock,
   PlacedNode,
+  PlantGridFitOptions,
   PlantAggregate,
   PlantLayout,
   Rect,
-  Satellite,
-  SatelliteInput,
-  SatelliteOptions,
-  SatelliteSlot,
   StageColumn,
   StageLayoutOptions,
   StageNodeInput,

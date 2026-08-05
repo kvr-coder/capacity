@@ -40,6 +40,7 @@ import type {
   WorkCenterAggregate,
 } from '@/canvas/layout'
 import { classifyDrop, previewImpact } from '@/canvas/layout'
+import { DRAG_THRESHOLD_PX, passedThreshold } from '@/canvas/gesture'
 
 export interface DragPayload {
   kind: 'group' | 'workCenter'
@@ -90,13 +91,26 @@ export interface DragMoveOptions {
   targetIds: readonly WorkCenterId[]
   /** Display label per work center, for the ghost and the applied-move text. */
   labelFor: (id: WorkCenterId) => string
-  /** World-space hit test, backed by the memoised layout. */
-  hitTest: (world: Point) => WorkCenterId | null
+  /**
+   * World-space hit test, backed by the memoised layout. Takes the source so a
+   * surface that stands for several work centers — a docked plant's card —
+   * can resolve to the one that can actually take this load.
+   */
+  hitTest: (world: Point, sourceId: WorkCenterId) => WorkCenterId | null
   screenToWorld: (point: Point) => Point
   /** Screen position of a target, for keyboard navigation order. */
   positionOf: (id: WorkCenterId) => Point | null
-  /** Authoritative bases from the worker for the source work center. */
+  /** Authoritative bases from the worker, as seen FROM {@link approvedBasisFor}. */
   approvedBasis?: ReadonlyMap<WorkCenterId, 'approved' | 'featureCapable' | 'retrofit'>
+  /**
+   * The work center `approvedBasis` was computed for. The allow-list is
+   * directional — "approved for the operations THIS work center runs" — so the
+   * bases the worker returned for the selected node say nothing about a drag
+   * that started somewhere else, and applying them anyway would let a drop
+   * claim approval it does not have. When they do not match, the drag falls
+   * back to the feature-only reading, which can never claim `approved`.
+   */
+  approvedBasisFor?: WorkCenterId | null
   fromWeek: WeekIndex
   toWeek: WeekIndex
   weekLabel: (week: WeekIndex) => string
@@ -122,9 +136,6 @@ export interface DragMoveApi {
   describe: (applied: AppliedMove) => string
 }
 
-/** Pointer travel before a press on a node becomes a move rather than a click. */
-const DRAG_THRESHOLD_PX = 5
-
 function selectorFor(payload: DragPayload): MaterialSelector {
   if (payload.kind === 'group' && payload.groupId !== undefined) {
     return { kind: 'group', id: payload.groupId }
@@ -143,6 +154,7 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
     screenToWorld,
     positionOf,
     approvedBasis,
+    approvedBasisFor,
     fromWeek,
     toWeek,
     weekLabel,
@@ -164,10 +176,22 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
   const dragRef = useRef<DragMeta | null>(null)
   dragRef.current = drag
 
+  /**
+   * The authoritative bases, but only when they describe the work center the
+   * load is leaving. See {@link DragMoveOptions.approvedBasisFor}.
+   */
+  const basisFor = useCallback(
+    (
+      sourceId: WorkCenterId,
+    ): ReadonlyMap<WorkCenterId, 'approved' | 'featureCapable' | 'retrofit'> | undefined =>
+      approvedBasisFor != null && approvedBasisFor === sourceId ? approvedBasis : undefined,
+    [approvedBasis, approvedBasisFor],
+  )
+
   // Handlers live for the length of a gesture; reading the latest callbacks
   // through refs keeps the window listeners from being re-bound mid-drag.
-  const latest = useRef({ hitTest, screenToWorld, positionOf, labelFor, aggregates, catalog, approvedBasis })
-  latest.current = { hitTest, screenToWorld, positionOf, labelFor, aggregates, catalog, approvedBasis }
+  const latest = useRef({ hitTest, screenToWorld, positionOf, labelFor, aggregates, catalog, basisFor })
+  latest.current = { hitTest, screenToWorld, positionOf, labelFor, aggregates, catalog, basisFor }
 
   const ghostRef = useCallback((element: HTMLElement | null) => {
     ghostElRef.current = element
@@ -184,12 +208,17 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
     for (const targetId of targetIds) {
       map.set(
         targetId,
-        classifyDrop({ sourceId: drag.payload.sourceWorkCenterId, targetId, catalog, approvedBasis }),
+        classifyDrop({
+          sourceId: drag.payload.sourceWorkCenterId,
+          targetId,
+          catalog,
+          approvedBasis: basisFor(drag.payload.sourceWorkCenterId),
+        }),
       )
     }
     return map
     // Only the source identity matters — moving the pointer must not reclassify.
-  }, [approvedBasis, catalog, drag?.payload.sourceWorkCenterId, targetIds]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [basisFor, catalog, drag?.payload.sourceWorkCenterId, targetIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const previewUtilisation = useMemo((): ReadonlyMap<WorkCenterId, number> => {
     const map = new Map<WorkCenterId, number>()
@@ -208,7 +237,7 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
             sourceId: payload.sourceWorkCenterId,
             targetId,
             catalog: store.catalog,
-            approvedBasis: store.approvedBasis,
+            approvedBasis: store.basisFor(payload.sourceWorkCenterId),
           })
     const preview =
       targetId === null
@@ -320,13 +349,23 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
       const origin = { x: localX, y: localY }
       let started = false
       const pointerId = event.pointerId
+      const detach = (): void => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', onCancel)
+        window.removeEventListener('keydown', onKey, true)
+      }
       const onMove = (moveEvent: PointerEvent): void => {
         if (moveEvent.pointerId !== pointerId) return
+        // Touch and pen: without this the browser would treat the same travel as
+        // a page scroll and steal the gesture halfway through. `touch-action:
+        // none` on the handle covers the compliant path; this covers the rest.
+        if (moveEvent.cancelable) moveEvent.preventDefault()
         const rect = containerRef.current?.getBoundingClientRect()
         const x = moveEvent.clientX - (rect?.left ?? 0)
         const y = moveEvent.clientY - (rect?.top ?? 0)
         if (!started) {
-          if (Math.hypot(x - origin.x, y - origin.y) < DRAG_THRESHOLD_PX) return
+          if (!passedThreshold(origin, { x, y }, DRAG_THRESHOLD_PX)) return
           started = true
           const initial: DragMeta = { payload, targetId: null, classification: null, preview: null, mode: 'pointer' }
           dragRef.current = initial
@@ -334,30 +373,36 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
         }
         moveGhost(x, y)
         const world = latest.current.screenToWorld({ x, y })
-        setTarget(payload, latest.current.hitTest(world), 'pointer')
+        setTarget(payload, latest.current.hitTest(world, payload.sourceWorkCenterId), 'pointer')
       }
       const onUp = (upEvent: PointerEvent): void => {
         if (upEvent.pointerId !== pointerId) return
-        window.removeEventListener('pointermove', onMove)
-        window.removeEventListener('pointerup', onUp)
-        window.removeEventListener('pointercancel', onCancel)
+        detach()
         if (!started) return
         const current = dragRef.current
         if (current?.targetId != null && current.classification !== null) {
           commitDrop(payload, current.targetId, current.classification)
         } else {
+          // Released over nothing. Same exit as a refusal: the gesture ends and
+          // takes its ghost and its dimming with it.
           cancelDrag()
         }
       }
       const onCancel = (): void => {
-        window.removeEventListener('pointermove', onMove)
-        window.removeEventListener('pointerup', onUp)
-        window.removeEventListener('pointercancel', onCancel)
+        detach()
         cancelDrag()
       }
-      window.addEventListener('pointermove', onMove)
+      // Escape abandons a pointer drag exactly as it abandons a keyboard one.
+      const onKey = (keyEvent: KeyboardEvent): void => {
+        if (keyEvent.key !== 'Escape') return
+        keyEvent.preventDefault()
+        detach()
+        cancelDrag()
+      }
+      window.addEventListener('pointermove', onMove, { passive: false })
       window.addEventListener('pointerup', onUp)
       window.addEventListener('pointercancel', onCancel)
+      window.addEventListener('keydown', onKey, true)
     },
     [cancelDrag, commitDrop, containerRef, moveGhost, setTarget],
   )
@@ -375,7 +420,7 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
               sourceId: payload.sourceWorkCenterId,
               targetId: id,
               catalog: store.catalog,
-              approvedBasis: store.approvedBasis,
+              approvedBasis: store.basisFor(payload.sourceWorkCenterId),
             }).allowed,
         ) ?? null
       setTarget(payload, first, 'keyboard')
@@ -402,7 +447,7 @@ export function useDragMove(options: DragMoveOptions): DragMoveApi {
               sourceId: current.payload.sourceWorkCenterId,
               targetId: id,
               catalog: store.catalog,
-              approvedBasis: store.approvedBasis,
+              approvedBasis: store.basisFor(current.payload.sourceWorkCenterId),
             })
         if (classification === null || !classification.allowed) continue
         const position = store.positionOf(id)

@@ -9,6 +9,7 @@ coverage
 artifacts
 mock/extract
 mock/compiled
+.scratch
 .env
 .env.*
 !.env.example

@@ -36,23 +36,26 @@ import { useActiveScenario, useUiStore } from '@/state/store'
 import { useModelResult, usePlantSlot, useRelief, useWorkCenterDetail } from '@/state/model'
 import type {
   ArcInput,
+  DockInput,
   EdgeInput,
   GlobeMark,
   GlobeSite,
-  PlacedNode,
-  SatelliteInput,
   StageNodeInput,
 } from '@/canvas/layout'
 import {
+  DOCK_RESERVED_WIDTH,
   aggregatePlants,
   aggregateWorkCenters,
   bubbleRadius,
   buildCapabilityCatalog,
+  classifyDrop,
   cullEdges,
   layoutArcs,
   layoutGlobe,
-  layoutSatellites,
+  layoutPartnerDock,
+  layoutPlantGridFitted,
   layoutStageColumns,
+  resolveDropTarget,
 } from '@/canvas/layout'
 import { WORLD, project } from '@/canvas/projection'
 import type { Point } from '@/canvas/projection'
@@ -63,7 +66,12 @@ import { GlobeLayer } from '@/canvas/GlobeLayer'
 import type { GlobeClusterMember, GlobeClusterNode, GlobePlantNode } from '@/canvas/GlobeLayer'
 import { PlantLayer } from '@/canvas/PlantLayer'
 import type { WorkCenterNodeView } from '@/canvas/PlantLayer'
-import { WORK_CENTER_WORLD, WorkCenterLayer, workCenterGhostTargets } from '@/canvas/WorkCenterLayer'
+import {
+  WORK_CENTER_MAX_RELIEF,
+  WORK_CENTER_WORLD,
+  WorkCenterLayer,
+  workCenterGhostTargets,
+} from '@/canvas/WorkCenterLayer'
 import type { GroupChip } from '@/canvas/WorkCenterLayer'
 import {
   CapabilityEdgeLegend,
@@ -71,13 +79,20 @@ import {
   CapabilityEdgesSvg,
   EDGE_CANVAS_THRESHOLD,
 } from '@/canvas/CapabilityEdges'
+import type { EdgeMode } from '@/canvas/CapabilityEdges'
 import { DragLayer } from '@/canvas/DragLayer'
 import styles from '@/canvas/NetworkCanvas.module.css'
 
-const SATELLITE_ORBIT = 180
-const MAX_SLOTS_PER_SATELLITE = 8
-const MAX_EDGES_PER_SLOT = 4
-const MAX_EDGES = 200
+/** Partners listed inside one opened dock card before the tail becomes a count. */
+const MAX_DOCK_SLOTS = 6
+/**
+ * Hard cap on drawn ropes. One rope per (work center, partner plant) already
+ * folds hundreds of pairs into tens of strands, so this is a backstop rather
+ * than a routine cull — and whatever it refuses is stated in the legend.
+ */
+const MAX_EDGES = 160
+/** Room around the plant grid and its dock, world units. */
+const PLANT_FRAME_MARGIN = 26
 
 /** Room around the plants' bounding box, world units. Covers bubble + label. */
 const GLOBE_FRAME_MARGIN = 104
@@ -100,7 +115,11 @@ const GLOBE_STAGE_MAX = 470
  * the composition back where it started: five marks adrift in ocean.
  */
 const GLOBE_FIT_PADDING = 28
-const FIT_PADDING = 56
+/**
+ * Deeper levels are fitted to their own content, which already carries its
+ * margin, so the inset here only has to keep marks off the stage edge.
+ */
+const FIT_PADDING = 34
 /** Pointer travel past which a press was a drag and its click is not a click. */
 const CLICK_SLOP_PX = 5
 /** How long a press stays attached to the click that follows it. */
@@ -289,165 +308,13 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
   }, [globeSites])
 
   // -------------------------------------------------------------------------
-  // Plant level
-  // -------------------------------------------------------------------------
-
-  const activePlantId = selection.plantId ?? catalog?.plants[0]?.id ?? null
-
-  const plantWorkCenters = useMemo(
-    () => visibleWorkCenters.filter((wc) => wc.plantId === activePlantId),
-    [activePlantId, visibleWorkCenters],
-  )
-
-  const plantLayout = useMemo(() => {
-    if (capabilityCatalog === null) return layoutStageColumns([], new Map())
-    const inputs: StageNodeInput[] = plantWorkCenters.map((wc) => ({
-      id: wc.id,
-      code: wc.code,
-      classId: wc.classId,
-      className: classNameById.get(wc.classId) ?? wc.classId,
-      stage: capabilityCatalog.stageByWorkCenter.get(wc.id) ?? 0,
-    }))
-    return layoutStageColumns(inputs, capabilityCatalog.stageLabel)
-  }, [capabilityCatalog, classNameById, plantWorkCenters])
-
-  const plantNodeViews = useMemo((): WorkCenterNodeView[] => {
-    return plantLayout.nodes.map((node) => {
-      const aggregate = aggregates.get(node.id)
-      return {
-        node,
-        aggregate,
-        labourBound: aggregate?.bindingPool === 'labour',
-        proposed: workCenterById.get(node.id)?.status === 'proposed',
-      }
-    })
-  }, [aggregates, plantLayout.nodes, workCenterById])
-
-  const satelliteBounds = useMemo(
-    () => ({ x: 0, y: -56, width: Math.max(240, plantLayout.width), height: Math.max(200, plantLayout.height + 70) }),
-    [plantLayout.height, plantLayout.width],
-  )
-
-  /**
-   * The other plants, carrying only work centers that actually share a
-   * capability with something in this plant — the whole point of the satellite
-   * is to make "somewhere else could make this" visible, so a plant with no
-   * overlap gets no satellite rather than an empty one.
-   */
-  const satellites = useMemo(() => {
-    if (capabilityCatalog === null || activePlantId === null) return []
-    const localOps = new Set<string>()
-    for (const wc of plantWorkCenters) {
-      for (const opId of capabilityCatalog.capableOpsByWorkCenter.get(wc.id) ?? []) localOps.add(opId)
-    }
-    const byPlant = new Map<PlantId, SatelliteInput>()
-    for (const wc of visibleWorkCenters) {
-      if (wc.plantId === activePlantId) continue
-      let shared = 0
-      for (const opId of capabilityCatalog.capableOpsByWorkCenter.get(wc.id) ?? []) {
-        if (localOps.has(opId)) shared += 1
-      }
-      if (shared === 0) continue
-      let entry = byPlant.get(wc.plantId)
-      if (entry === undefined) {
-        entry = { plantId: wc.plantId, label: plantCodeOf(wc.plantId), siblings: [] }
-        byPlant.set(wc.plantId, entry)
-      }
-      entry.siblings.push({ workCenterId: wc.id, code: wc.code, weight: shared })
-    }
-    const inputs = Array.from(byPlant.values()).sort((a, b) => (a.plantId < b.plantId ? -1 : 1))
-    return layoutSatellites(inputs, {
-      bounds: satelliteBounds,
-      orbit: SATELLITE_ORBIT,
-      maxSlots: MAX_SLOTS_PER_SATELLITE,
-    })
-  }, [activePlantId, capabilityCatalog, plantCodeOf, plantWorkCenters, satelliteBounds, visibleWorkCenters])
-
-  const satelliteSlotById = useMemo(() => {
-    const map = new Map<WorkCenterId, { x: number; y: number; r: number; hub: Point }>()
-    for (const satellite of satellites) {
-      for (const slot of satellite.slots) {
-        map.set(slot.workCenterId, { x: slot.x, y: slot.y, r: slot.r, hub: { x: satellite.x, y: satellite.y } })
-      }
-    }
-    return map
-  }, [satellites])
-
-  /** Authoritative bases for the selected work center, straight from the worker. */
-  const detail = useWorkCenterDetail(selection.workCenterId)
-  const relief = useRelief(selection.workCenterId)
-
-  const approvedBasis = useMemo(() => {
-    const map = new Map<WorkCenterId, 'approved' | 'featureCapable' | 'retrofit'>()
-    for (const sibling of detail.data?.siblings ?? []) map.set(sibling.workCenterId, sibling.basis)
-    return map
-  }, [detail.data])
-
-  const edgeCull = useMemo(() => {
-    if (capabilityCatalog === null) return { edges: [], hidden: 0, total: 0 }
-    const inputs: EdgeInput[] = []
-    for (const satellite of satellites) {
-      for (const slot of satellite.slots) {
-        const remoteOps = capabilityCatalog.capableOpsByWorkCenter.get(slot.workCenterId) ?? new Set<string>()
-        const ranked: Array<{ node: PlacedNode; shared: number }> = []
-        for (const node of plantLayout.nodes) {
-          const localOps = capabilityCatalog.capableOpsByWorkCenter.get(node.id) ?? new Set<string>()
-          let shared = 0
-          for (const opId of localOps) if (remoteOps.has(opId)) shared += 1
-          if (shared > 0) ranked.push({ node, shared })
-        }
-        ranked.sort((a, b) => b.shared - a.shared || (a.node.id < b.node.id ? -1 : 1))
-        for (const { node, shared } of ranked.slice(0, MAX_EDGES_PER_SLOT)) {
-          const basis = approvedBasis.get(slot.workCenterId) ?? 'featureCapable'
-          inputs.push({
-            id: `${node.id}>${slot.workCenterId}`,
-            fromId: node.id,
-            toId: slot.workCenterId,
-            from: { x: node.x, y: node.y },
-            to: { x: slot.x, y: slot.y },
-            hub: { x: satellite.x, y: satellite.y },
-            basis,
-            weight: shared,
-          })
-        }
-      }
-    }
-    // The cull's job here is the hard cap and the ranking, both of which have to
-    // be stable across a pan. Off-screen FADING is decided per frame by the
-    // canvas renderer, which already has the live transform in hand.
-    const culled = cullEdges(inputs, { x: -1e7, y: -1e7, width: 2e7, height: 2e7 }, MAX_EDGES)
-    return { edges: culled.edges, hidden: culled.hidden, total: inputs.length }
-  }, [approvedBasis, capabilityCatalog, plantLayout.nodes, satellites])
-
-  // -------------------------------------------------------------------------
-  // Work-center level
-  // -------------------------------------------------------------------------
-
-  const activeWorkCenterId = selection.workCenterId ?? plantLayout.nodes[0]?.id ?? null
-  const reliefCandidates = useMemo(() => (relief.data ?? []).slice(0, 7), [relief.data])
-  const ghostTargets = useMemo(
-    () => workCenterGhostTargets(reliefCandidates.map((candidate) => candidate.toWorkCenterId)),
-    [reliefCandidates],
-  )
-
-  // -------------------------------------------------------------------------
   // Transform
+  //
+  // Created before the deeper layouts because the plant grid is packed to fit
+  // the stage it will be drawn into, so the layout needs the measured size. The
+  // rectangles it is fitted TO are assembled further down, once those layouts
+  // exist.
   // -------------------------------------------------------------------------
-
-  const worldRect = useMemo(() => {
-    if (zoom === 'globe') return globeFrame
-    if (zoom === 'plant') {
-      const padX = SATELLITE_ORBIT + 110
-      const padY = SATELLITE_ORBIT * 0.7 + 110
-      return {
-        x: satelliteBounds.x - padX,
-        y: satelliteBounds.y - padY,
-        width: satelliteBounds.width + padX * 2,
-        height: satelliteBounds.height + padY * 2,
-      }
-    }
-    return WORK_CENTER_WORLD
-  }, [globeFrame, satelliteBounds, zoom])
 
   const drillOut = useCallback(() => {
     if (zoom === 'workCenter') setZoom('plant')
@@ -478,6 +345,352 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
       }),
     [subscribe],
   )
+
+  const transformSize = transform.size
+
+  // -------------------------------------------------------------------------
+  // Plant level
+  // -------------------------------------------------------------------------
+
+  const activePlantId = selection.plantId ?? catalog?.plants[0]?.id ?? null
+
+  const plantWorkCenters = useMemo(
+    () => visibleWorkCenters.filter((wc) => wc.plantId === activePlantId),
+    [activePlantId, visibleWorkCenters],
+  )
+
+  /**
+   * Inside one plant every code carries the same plant prefix, so the disc shows
+   * the part that differs and the full code stays in the tooltip and the table.
+   */
+  const shortCodeOf = useCallback(
+    (id: WorkCenterId): string => {
+      const code = codeOf(id)
+      const plantId = workCenterById.get(id)?.plantId
+      const prefix = plantId === undefined ? '' : `${plantCodeOf(plantId)}-`
+      return prefix.length > 1 && code.startsWith(prefix) ? code.slice(prefix.length) : code
+    },
+    [codeOf, plantCodeOf, workCenterById],
+  )
+
+  /**
+   * The other plants, carrying only work centers that actually share a
+   * capability with something in this plant — the whole point of the dock is to
+   * make "somewhere else could make this" reachable, so a plant with no overlap
+   * gets no card rather than an empty one.
+   */
+  const dockInputs = useMemo((): DockInput[] => {
+    if (capabilityCatalog === null || activePlantId === null) return []
+    const localOps = new Set<string>()
+    for (const wc of plantWorkCenters) {
+      for (const opId of capabilityCatalog.capableOpsByWorkCenter.get(wc.id) ?? []) localOps.add(opId)
+    }
+    const byPlant = new Map<PlantId, DockInput>()
+    for (const wc of visibleWorkCenters) {
+      if (wc.plantId === activePlantId) continue
+      let shared = 0
+      for (const opId of capabilityCatalog.capableOpsByWorkCenter.get(wc.id) ?? []) {
+        if (localOps.has(opId)) shared += 1
+      }
+      if (shared === 0) continue
+      let entry = byPlant.get(wc.plantId)
+      if (entry === undefined) {
+        entry = { plantId: wc.plantId, label: plantCodeOf(wc.plantId), partners: [] }
+        byPlant.set(wc.plantId, entry)
+      }
+      entry.partners.push({ workCenterId: wc.id, code: wc.code, weight: shared })
+    }
+    return Array.from(byPlant.values()).sort((a, b) => (a.plantId < b.plantId ? -1 : 1))
+  }, [activePlantId, capabilityCatalog, plantCodeOf, plantWorkCenters, visibleWorkCenters])
+
+  /**
+   * The stage, less the fit inset and the world the dock and margins claim.
+   * Rounded so a one-pixel resize cannot re-solve the packing.
+   */
+  const plantFitBox = useMemo(
+    () => ({
+      width: Math.max(240, Math.round((transformSize.width - FIT_PADDING * 2) / 20) * 20),
+      height: Math.max(200, Math.round((transformSize.height - FIT_PADDING * 2) / 20) * 20),
+    }),
+    [transformSize.height, transformSize.width],
+  )
+
+  const plantLayout = useMemo(() => {
+    if (capabilityCatalog === null) return layoutStageColumns([], new Map())
+    const inputs: StageNodeInput[] = plantWorkCenters.map((wc) => ({
+      id: wc.id,
+      code: wc.code,
+      label: shortCodeOf(wc.id),
+      classId: wc.classId,
+      className: classNameById.get(wc.classId) ?? wc.classId,
+      stage: capabilityCatalog.stageByWorkCenter.get(wc.id) ?? 0,
+    }))
+    return layoutPlantGridFitted(inputs, capabilityCatalog.stageLabel, {
+      available: plantFitBox,
+      reservedWidth: (dockInputs.length > 0 ? DOCK_RESERVED_WIDTH : 0) + PLANT_FRAME_MARGIN * 2,
+      reservedHeight: PLANT_FRAME_MARGIN * 2,
+    })
+  }, [capabilityCatalog, classNameById, dockInputs.length, plantFitBox, plantWorkCenters, shortCodeOf])
+
+  const plantNodeViews = useMemo((): WorkCenterNodeView[] => {
+    return plantLayout.nodes.map((node) => {
+      const aggregate = aggregates.get(node.id)
+      return {
+        node,
+        aggregate,
+        labourBound: aggregate?.bindingPool === 'labour',
+        proposed: workCenterById.get(node.id)?.status === 'proposed',
+      }
+    })
+  }, [aggregates, plantLayout.nodes, workCenterById])
+
+  /**
+   * The grid's own bounding box — the plant's work centers and nothing else.
+   * The frame is built from THIS, which is the whole point: fitting to a ring of
+   * off-plant context is what left the content at a third of the frame.
+   */
+  const gridBounds = useMemo(
+    () => ({ x: 0, y: 0, width: Math.max(320, plantLayout.width), height: Math.max(240, plantLayout.height) }),
+    [plantLayout.height, plantLayout.width],
+  )
+
+  const [openDockPlants, setOpenDockPlants] = useState<ReadonlySet<PlantId>>(() => new Set())
+  const [dockOpenForDrag, setDockOpenForDrag] = useState(false)
+  const [edgeMode, setEdgeMode] = useState<EdgeMode>('focus')
+
+  const toggleDock = useCallback((plantId: PlantId) => {
+    setOpenDockPlants((prior) => {
+      const next = new Set(prior)
+      if (next.has(plantId)) next.delete(plantId)
+      else next.add(plantId)
+      return next
+    })
+  }, [])
+
+  // Leaving the plant closes the dock again: a card left open in Toledo is not a
+  // statement about Suzhou.
+  useEffect(() => {
+    setOpenDockPlants(new Set())
+  }, [activePlantId])
+
+  /**
+   * A move in flight opens every card, because a drop target the planner cannot
+   * see is a drop target that does not exist. The gutter rectangle the view is
+   * fitted to deliberately ignores this, so the canvas never re-fits mid-drag.
+   */
+  const expandedDockPlants = useMemo(
+    () => (dockOpenForDrag ? new Set(dockInputs.map((input) => input.plantId)) : openDockPlants),
+    [dockInputs, dockOpenForDrag, openDockPlants],
+  )
+
+  const dock = useMemo(
+    () =>
+      layoutPartnerDock(dockInputs, {
+        gridBounds,
+        expanded: expandedDockPlants,
+        maxSlots: MAX_DOCK_SLOTS,
+        fitExpandedToGutter: dockOpenForDrag,
+      }),
+    [dockInputs, dockOpenForDrag, expandedDockPlants, gridBounds],
+  )
+
+  const dockSlotById = useMemo(() => {
+    const map = new Map<WorkCenterId, { x: number; y: number; r: number; hub: Point }>()
+    for (const card of dock.cards) {
+      for (const slot of card.slots) {
+        map.set(slot.workCenterId, { x: slot.x, y: slot.y, r: slot.rowHeight / 2, hub: card.hub })
+      }
+    }
+    return map
+  }, [dock])
+
+  /** Authoritative bases for the selected work center, straight from the worker. */
+  const detail = useWorkCenterDetail(selection.workCenterId)
+  const relief = useRelief(selection.workCenterId)
+
+  /**
+   * The work center the pointer last picked up, set at `pointerdown` — before
+   * the gesture has decided whether it is a click or a drag.
+   *
+   * The allow-list is directional: "approved for the operations THIS work center
+   * runs". So the bases that classify a drop have to be the SOURCE's, and the
+   * source is whatever was pressed, which is not necessarily what is selected.
+   * Asking for it here means the answer is usually already in hand by the time
+   * the pointer has travelled the five pixels that make the press a drag.
+   */
+  const [pickedUpId, setPickedUpId] = useState<WorkCenterId | null>(null)
+  const pickedUpDetail = useWorkCenterDetail(pickedUpId ?? undefined)
+
+  /**
+   * Whichever detail describes the work center the load would leave. Read off
+   * the payload rather than the request, so a reply still in flight can never
+   * be mistaken for an answer about the node under the pointer.
+   */
+  const basisDetail = pickedUpId === null ? detail : pickedUpDetail
+  const approvedBasisFor = basisDetail.data?.workCenterId ?? null
+
+  const approvedBasis = useMemo(() => {
+    const map = new Map<WorkCenterId, 'approved' | 'featureCapable' | 'retrofit'>()
+    for (const sibling of basisDetail.data?.siblings ?? []) map.set(sibling.workCenterId, sibling.basis)
+    return map
+  }, [basisDetail.data])
+
+  /** The work center whose links are traced in `focus` mode. */
+  const edgeFocusId = useMemo((): WorkCenterId | null => {
+    const candidate = hoveredId ?? selection.workCenterId ?? focusedId
+    if (candidate == null || candidate.startsWith('dock:')) return null
+    return plantLayout.byId.has(candidate) || dockSlotById.has(candidate) ? candidate : null
+  }, [dockSlotById, focusedId, hoveredId, plantLayout.byId, selection.workCenterId])
+
+  /**
+   * Capability links, bundled ONE ROPE PER (work center, partner plant).
+   *
+   * Drawing every (local, remote) pair individually is what made this a
+   * hairball: the pairs are dense by construction, and twenty near-parallel
+   * curves into the same plant say exactly what one curve and the number twenty
+   * say. So the pairs are folded per plant, the rope lands on that plant's dock
+   * card, and only an OPENED card resolves back into per-work-center strands.
+   *
+   * In `focus` mode only the ropes touching one work center are built at all,
+   * which is both the honest default and the reason a pan stays cheap.
+   */
+  const edgeCull = useMemo(() => {
+    if (capabilityCatalog === null || dock.cards.length === 0 || zoom !== 'plant') {
+      return { edges: [], hidden: 0, drawn: 0, pairs: 0 }
+    }
+    const focusOnly = edgeMode === 'focus'
+    if (focusOnly && edgeFocusId === null) return { edges: [], hidden: 0, drawn: 0, pairs: 0 }
+
+    const opsOf = (id: WorkCenterId): ReadonlySet<string> =>
+      capabilityCatalog.capableOpsByWorkCenter.get(id) ?? new Set<string>()
+
+    interface Rope {
+      key: string
+      fromId: WorkCenterId
+      toId: string
+      from: Point
+      to: Point
+      hub: Point
+      basis: 'approved' | 'featureCapable' | 'retrofit'
+      weight: number
+    }
+    const ropes = new Map<string, Rope>()
+    let pairs = 0
+
+    const rank: Record<'approved' | 'featureCapable' | 'retrofit', number> = {
+      approved: 3,
+      featureCapable: 2,
+      retrofit: 1,
+    }
+
+    for (const input of dockInputs) {
+      const card = dock.byPlant.get(input.plantId)
+      if (card === undefined) continue
+      for (const partner of input.partners) {
+        const remoteOps = opsOf(partner.workCenterId)
+        if (remoteOps.size === 0) continue
+        // An opened card resolves to its own rows; a closed one lands every rope
+        // on the card's anchor, which is what collapses the fan.
+        const slot = card.slots.find((entry) => entry.workCenterId === partner.workCenterId)
+        const endpoint = slot === undefined ? card.anchor : { x: slot.x, y: slot.y }
+        const endpointId = slot === undefined ? card.id : partner.workCenterId
+
+        for (const node of plantLayout.nodes) {
+          if (focusOnly && node.id !== edgeFocusId && partner.workCenterId !== edgeFocusId) continue
+          const localOps = opsOf(node.id)
+          let shared = 0
+          for (const opId of localOps) if (remoteOps.has(opId)) shared += 1
+          if (shared === 0) continue
+          pairs += 1
+          const basis = approvedBasis.get(partner.workCenterId) ?? 'featureCapable'
+          const key = `${node.id}>${endpointId}`
+          const prior = ropes.get(key)
+          if (prior === undefined) {
+            ropes.set(key, {
+              key,
+              fromId: node.id,
+              toId: endpointId,
+              from: { x: node.x, y: node.y },
+              to: endpoint,
+              hub: card.hub,
+              basis,
+              weight: shared,
+            })
+          } else {
+            prior.weight += shared
+            if (rank[basis] > rank[prior.basis]) prior.basis = basis
+          }
+        }
+      }
+    }
+
+    const inputs: EdgeInput[] = Array.from(ropes.values()).map((rope) => ({
+      id: rope.key,
+      fromId: rope.fromId,
+      toId: rope.toId,
+      from: rope.from,
+      to: rope.to,
+      hub: rope.hub,
+      basis: rope.basis,
+      weight: rope.weight,
+    }))
+    // The cull's job here is the hard cap and the ranking, both of which have to
+    // be stable across a pan. Off-screen FADING is decided per frame by the
+    // canvas renderer, which already has the live transform in hand.
+    const culled = cullEdges(inputs, { x: -1e7, y: -1e7, width: 2e7, height: 2e7 }, MAX_EDGES)
+    return { edges: culled.edges, hidden: culled.hidden, drawn: culled.edges.length, pairs }
+  }, [
+    approvedBasis,
+    capabilityCatalog,
+    dock.byPlant,
+    dock.cards.length,
+    dockInputs,
+    edgeFocusId,
+    edgeMode,
+    plantLayout.nodes,
+    zoom,
+  ])
+
+  // -------------------------------------------------------------------------
+  // Work-center level
+  // -------------------------------------------------------------------------
+
+  const activeWorkCenterId = selection.workCenterId ?? plantLayout.nodes[0]?.id ?? null
+  const reliefCandidates = useMemo(
+    () => (relief.data ?? []).slice(0, WORK_CENTER_MAX_RELIEF),
+    [relief.data],
+  )
+  const ghostTargets = useMemo(
+    () => workCenterGhostTargets(reliefCandidates.map((candidate) => candidate.toWorkCenterId)),
+    [reliefCandidates],
+  )
+
+  // -------------------------------------------------------------------------
+  // Transform
+  // -------------------------------------------------------------------------
+
+  /**
+   * The plant frame: the grid, its dock gutter, and a margin. Nothing else.
+   *
+   * Deliberately independent of which dock cards are open — the effect below
+   * re-fits whenever this rectangle changes, and a frame that grew when a card
+   * opened would rescale the whole canvas under the reader's hands.
+   */
+  const plantFrame = useMemo(() => {
+    const right = dock.cards.length === 0 ? gridBounds.width : dock.gutter.x + dock.gutter.width
+    return {
+      x: gridBounds.x - PLANT_FRAME_MARGIN,
+      y: gridBounds.y - PLANT_FRAME_MARGIN,
+      width: right + PLANT_FRAME_MARGIN * 2,
+      height: Math.max(gridBounds.height, dock.gutter.height) + PLANT_FRAME_MARGIN * 2,
+    }
+  }, [dock.cards.length, dock.gutter.height, dock.gutter.width, dock.gutter.x, gridBounds])
+
+  const worldRect = useMemo(() => {
+    if (zoom === 'globe') return globeFrame
+    if (zoom === 'plant') return plantFrame
+    return WORK_CENTER_WORLD
+  }, [globeFrame, plantFrame, zoom])
 
   const fitPadding = zoom === 'globe' ? GLOBE_FIT_PADDING : FIT_PADDING
   const fitTo = transform.fitTo
@@ -611,46 +824,87 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
   // Hit testing and drag
   // -------------------------------------------------------------------------
 
-  const hitTest = useCallback(
+  /**
+   * Is this a target `sourceId`'s load could actually land on? Used to resolve
+   * a drop on a surface that stands for many work centers — a docked plant's
+   * card — onto the one that can take it.
+   */
+  const isLegalTarget = useCallback(
+    (sourceId: WorkCenterId, targetId: WorkCenterId): boolean => {
+      if (capabilityCatalog === null) return false
+      return classifyDrop({
+        sourceId,
+        targetId,
+        catalog: capabilityCatalog,
+        approvedBasis: approvedBasisFor === sourceId ? approvedBasis : undefined,
+      }).allowed
+    },
+    [approvedBasis, approvedBasisFor, capabilityCatalog],
+  )
+
+  /**
+   * The work center DRAWN at this point — a grid node or a row in an opened
+   * dock card. Deliberately not the drop resolution: a double-click on a docked
+   * plant's card is a disclosure, not a request to open whichever partner would
+   * have accepted a drop.
+   */
+  const markAt = useCallback(
     (world: Point): WorkCenterId | null => {
-      if (zoom === 'plant') {
-        for (const node of plantLayout.nodes) {
-          if (Math.hypot(world.x - node.x, world.y - node.y) <= node.r + 6) return node.id
-        }
-        for (const [id, slot] of satelliteSlotById) {
-          if (Math.hypot(world.x - slot.x, world.y - slot.y) <= slot.r + 8) return id
-        }
-        return null
-      }
       if (zoom === 'workCenter') {
         for (const target of ghostTargets) {
           if (Math.hypot(world.x - target.x, world.y - target.y) <= target.r) return target.id
         }
         return null
       }
+      if (zoom !== 'plant') return null
+      for (const node of plantLayout.nodes) {
+        if (Math.hypot(world.x - node.x, world.y - node.y) <= node.r + 6) return node.id
+      }
+      for (const card of dock.cards) {
+        for (const slot of card.slots) {
+          if (
+            world.x >= slot.rowX &&
+            world.x <= slot.rowX + slot.rowWidth &&
+            world.y >= slot.rowY &&
+            world.y <= slot.rowY + slot.rowHeight
+          ) {
+            return slot.workCenterId
+          }
+        }
+      }
       return null
     },
-    [ghostTargets, plantLayout.nodes, satelliteSlotById, zoom],
+    [dock.cards, ghostTargets, plantLayout.nodes, zoom],
+  )
+
+  const hitTest = useCallback(
+    (world: Point, sourceId: WorkCenterId): WorkCenterId | null => {
+      if (zoom === 'plant') {
+        return resolveDropTarget(world, { nodes: plantLayout.nodes, dock }, (id) => isLegalTarget(sourceId, id))
+      }
+      return markAt(world)
+    },
+    [dock, isLegalTarget, markAt, plantLayout.nodes, zoom],
   )
 
   const positionOf = useCallback(
     (id: WorkCenterId): Point | null => {
       const node = plantLayout.byId.get(id)
       if (node !== undefined) return { x: node.x, y: node.y }
-      const slot = satelliteSlotById.get(id)
+      const slot = dockSlotById.get(id)
       if (slot !== undefined) return { x: slot.x, y: slot.y }
       const ghost = ghostTargets.find((target) => target.id === id)
       return ghost === undefined ? null : { x: ghost.x, y: ghost.y }
     },
-    [ghostTargets, plantLayout.byId, satelliteSlotById],
+    [dockSlotById, ghostTargets, plantLayout.byId],
   )
 
   const targetIds = useMemo(() => {
     if (zoom === 'workCenter') return ghostTargets.map((target) => target.id)
     const ids = plantLayout.nodes.map((node) => node.id)
-    for (const id of satelliteSlotById.keys()) ids.push(id)
+    for (const id of dockSlotById.keys()) ids.push(id)
     return ids
-  }, [ghostTargets, plantLayout.nodes, satelliteSlotById, zoom])
+  }, [dockSlotById, ghostTargets, plantLayout.nodes, zoom])
 
   const labelFor = useCallback((id: WorkCenterId): string => codeOf(id), [codeOf])
 
@@ -664,10 +918,18 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
     screenToWorld: transform.screenToWorld,
     positionOf,
     approvedBasis,
+    approvedBasisFor,
     fromWeek: filters.fromWeek,
     toWeek: filters.toWeek,
     weekLabel,
   })
+
+  // A move in flight opens every dock card, so its rows are reachable as drop
+  // targets. Cleared the moment the move settles.
+  const dragActive = drag.drag !== null
+  useEffect(() => {
+    setDockOpenForDrag(dragActive)
+  }, [dragActive])
 
   const payloadForWorkCenter = useCallback(
     (id: WorkCenterId): DragPayload => ({
@@ -686,6 +948,7 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
       // takes it explicitly — otherwise clicking a node would silently disarm
       // every keyboard shortcut on the canvas.
       containerRef.current?.focus()
+      setPickedUpId(id)
       drag.beginPointerDrag(payloadForWorkCenter(id), event)
     },
     [drag, payloadForWorkCenter],
@@ -733,6 +996,7 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
   const onChipPointerDown = useCallback(
     (chip: GroupChip, event: React.PointerEvent<Element>) => {
       if (activeWorkCenterId === null) return
+      setPickedUpId(activeWorkCenterId)
       drag.beginPointerDrag(
         {
           kind: 'group',
@@ -845,12 +1109,12 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
         return
       }
       if (zoom === 'plant') {
-        const hit = hitTest(world)
+        const hit = markAt(world)
         if (hit !== null) drillWorkCenter(hit)
         else if (activeWorkCenterId !== null) setZoom('workCenter')
         return
       }
-      const hit = hitTest(world)
+      const hit = markAt(world)
       if (hit !== null) drillWorkCenter(hit)
       else transform.zoomBy(1.6)
     },
@@ -859,7 +1123,7 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
       activeWorkCenterId,
       drillWorkCenter,
       globePlacement,
-      hitTest,
+      markAt,
       openGlobeMark,
       setZoom,
       transform,
@@ -868,11 +1132,22 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
   )
   drillInRef.current = handleDrillIn
 
+  /**
+   * Tab order at plant level: every work center, then the dock — each card
+   * followed by its own rows when it is open. Anything clickable is reachable.
+   */
   const focusOrder = useMemo(() => {
     if (zoom === 'globe') return globePlacement.map((mark) => mark.id)
-    if (zoom === 'plant') return plantLayout.nodes.map((node) => node.id)
+    if (zoom === 'plant') {
+      const ids: string[] = plantLayout.nodes.map((node) => node.id)
+      for (const card of dock.cards) {
+        ids.push(card.id)
+        for (const slot of card.slots) ids.push(slot.workCenterId)
+      }
+      return ids
+    }
     return ghostTargets.map((target) => target.id)
-  }, [ghostTargets, globePlacement, plantLayout.nodes, zoom])
+  }, [dock.cards, ghostTargets, globePlacement, plantLayout.nodes, zoom])
 
   /**
    * Move the node focus by `delta`, returning false when the step would leave
@@ -935,14 +1210,27 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
       if (event.key === 'Enter') {
         event.preventDefault()
         if (focusedId === null) return
-        if (zoom === 'globe') openGlobeMark(focusedId)
-        else drillWorkCenter(focusedId)
+        if (zoom === 'globe') {
+          openGlobeMark(focusedId)
+          return
+        }
+        // A dock card is a disclosure, not a destination: Enter opens the list
+        // of partners rather than navigating away from the plant.
+        const card = dock.cards.find((entry) => entry.id === focusedId)
+        if (card !== undefined) {
+          toggleDock(card.plantId)
+          return
+        }
+        drillWorkCenter(focusedId)
         return
       }
       if ((event.key === 'm' || event.key === 'M') && zoom !== 'globe') {
         event.preventDefault()
-        const sourceId = focusedId ?? activeWorkCenterId
+        const sourceId = focusedId !== null && !focusedId.startsWith('dock:') ? focusedId : activeWorkCenterId
         if (sourceId === null) return
+        // Same reason as the pointer path: the bases that classify this move are
+        // the SOURCE's, and the source is what has focus, not what is selected.
+        setPickedUpId(sourceId)
         drag.beginKeyboardMove(payloadForWorkCenter(sourceId))
         return
       }
@@ -950,12 +1238,14 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
     },
     [
       activeWorkCenterId,
+      dock.cards,
       drag,
       drillWorkCenter,
       focusedId,
       openGlobeMark,
       payloadForWorkCenter,
       stepFocus,
+      toggleDock,
       transform,
       zoom,
     ],
@@ -1203,7 +1493,7 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
               <PlantLayer
                 layout={plantLayout}
                 nodes={plantNodeViews}
-                satellites={satellites}
+                dock={dock}
                 slotOfPlant={slotOfPlant}
                 plantCodeOf={plantCodeOf}
                 codeOf={codeOf}
@@ -1217,6 +1507,7 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
                 onHover={setHoveredId}
                 onActivate={activateWorkCenter}
                 onNodePointerDown={onNodePointerDown}
+                onDockToggle={toggleDock}
               />
             ) : null}
 
@@ -1229,7 +1520,7 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
                 plantLabel={plantCodeOf(activeWorkCenter?.plantId ?? '')}
                 aggregate={aggregates.get(activeWorkCenterId)}
                 detail={detail.data}
-                relief={reliefCandidates}
+                relief={relief.data}
                 loading={detail.loading || relief.loading}
                 fromWeek={filters.fromWeek}
                 toWeek={filters.toWeek}
@@ -1262,7 +1553,14 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
 
         <div className={styles.hud} data-level={zoom}>
           {zoom === 'plant' ? (
-            <CapabilityEdgeLegend hidden={edgeCull.hidden} total={edgeCull.total} />
+            <CapabilityEdgeLegend
+              mode={edgeMode}
+              onModeChange={setEdgeMode}
+              drawn={edgeCull.drawn}
+              pairs={edgeCull.pairs}
+              hidden={edgeCull.hidden}
+              focusLabel={edgeFocusId === null ? null : codeOf(edgeFocusId)}
+            />
           ) : null}
           {zoom === 'globe' ? <ArcLegend count={arcs.length} slotOfPlant={slotOfPlant} plants={globePlants} /> : null}
           <p className={styles.keys}>
@@ -1284,7 +1582,8 @@ export function NetworkCanvas({ className, height = 620 }: NetworkCanvasProps) {
         </button>
         <span className={styles.footerNote}>
           {zoom === 'plant'
-            ? `${plantNodeViews.length} work centers · ${edgeCull.edges.length} capability links drawn`
+            ? `${plantNodeViews.length} work centers · ${dock.cards.length} partner plants docked · ` +
+              `${edgeCull.edges.length} capability ${edgeCull.edges.length === 1 ? 'rope' : 'ropes'} drawn`
             : zoom === 'globe'
               ? `${globePlants.length} plants · ${arcs.length} cross-plant flows`
               : `${(detail.data?.cells ?? []).length} weeks of detail`}

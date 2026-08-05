@@ -9,6 +9,9 @@ what they'd do — without touching the real plan.
 Everything runs in your browser. No server, no database, no account, no data leaves your
 machine.
 
+> Everything below is also in the app itself — click the **?** in the top-right corner
+> (Help & guide) for the same walkthrough and glossary without leaving the screen you're on.
+
 ---
 
 ## Open it

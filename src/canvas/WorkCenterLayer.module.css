@@ -86,6 +86,12 @@
   text-transform: uppercase;
 }
 
+.sectionNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
 .panelTitle {
   fill: var(--text-primary);
   font-family: var(--font-sans);
@@ -258,10 +264,16 @@
 
 /* --- interaction --------------------------------------------------------- */
 
+/*
+ * A drag handle. `touch-action: none` is not decoration: without it a touch
+ * drag on this mark is claimed by the browser as a page scroll, and the move
+ * gesture is taken away halfway through with no way to get it back.
+ */
 .grab {
   fill: transparent;
   pointer-events: auto;
   cursor: grab;
+  touch-action: none;
 }
 
 .grab:active {

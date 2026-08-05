@@ -26,16 +26,40 @@ import { hours as fmtHours, pct, usd } from '@/lib/format'
 import { divergingColor, statusColor } from '@/charts/palette'
 import type { DropClassification, WorkCenterAggregate } from '@/canvas/layout'
 import { layoutGhostFan, layoutStrip, utilisationSignal } from '@/canvas/layout'
+import { DRAG_HANDLE_ATTRIBUTE } from '@/canvas/gesture'
 import { DropIconMark } from '@/canvas/DragLayer'
 import styles from '@/canvas/WorkCenterLayer.module.css'
 
-const FOCUS = { x: 170, y: 150, r: 56 }
-const GHOST = { radius: 250, r: 34, span: Math.PI * 0.62, centerAngle: Math.PI / 2 }
-const CHIPS = { x: -20, y: 470, width: 320, rowHeight: 30, gap: 7 }
-const PANEL = { x: 470, width: 780 }
-const STRIP = { y: 66, height: 168 }
-const DOWNTIME = { y: 288, height: 26 }
-const OEE = { y: 372, height: 118 }
+/**
+ * The left column is a vertical rhythm — node, then relief, then the load that
+ * can be moved — and every band below is sized so the one above cannot reach
+ * into it. The fan is the awkward one: it is 2 x radius wide and radius tall,
+ * and letting it run to seven candidates put its captions straight through the
+ * product-group heading. Five candidates fan wide enough to caption themselves
+ * and still leave the chips a band of their own.
+ */
+const FOCUS = { x: 170, y: 148, r: 58 }
+const GHOST = {
+  origin: { x: 190, y: 194 },
+  /**
+   * Wide enough that two adjacent captions cannot print over each other: the
+   * horizontal step between neighbours is about `radius * span / (max - 1)`,
+   * and a caption is ~90 units of text.
+   */
+  radius: 215,
+  r: 32,
+  span: Math.PI * 0.62,
+  centerAngle: Math.PI / 2,
+  /** Best candidates fanned. The rest are named in the caption, not dropped. */
+  max: 5,
+}
+const RELIEF = { labelX: -20, labelY: 238, noteY: 256 }
+/** Two columns, so eight product groups cost four rows rather than eight. */
+const CHIPS = { x: -20, y: 502, colWidth: 202, colGap: 12, rowHeight: 30, rowGap: 8, columns: 2, max: 8 }
+const PANEL = { x: 470, width: 860 }
+const STRIP = { y: 70, height: 196 }
+const DOWNTIME = { y: 322, height: 28 }
+const OEE = { y: 406, height: 140 }
 
 const BASIS_STATUS: Record<ReliefCandidate['basis'], { status: DropClassification['status']; icon: DropClassification['icon']; label: string }> = {
   approved: { status: 'good', icon: 'check', label: 'Approved' },
@@ -43,11 +67,18 @@ const BASIS_STATUS: Record<ReliefCandidate['basis'], { status: DropClassificatio
   retrofit: { status: 'serious', icon: 'tool', label: 'Needs retrofit' },
 }
 
-/** World rectangle this layer occupies. The transform fits to it on entry. */
-export const WORK_CENTER_WORLD = { x: -160, y: -40, width: 1450, height: 740 }
+/**
+ * World rectangle this layer occupies. The transform fits to it on entry, so it
+ * has to be the CONTENT's own extent: a rectangle bigger than what is drawn is
+ * indistinguishable, on screen, from drawing everything too small.
+ */
+export const WORK_CENTER_WORLD = { x: -44, y: -34, width: 1400, height: 716 }
 
 /** The focused node, for hit testing and keyboard navigation. */
 export const WORK_CENTER_FOCUS = { x: FOCUS.x, y: FOCUS.y, r: FOCUS.r }
+
+/** Relief candidates the fan has room for. The tail is captioned, not hidden. */
+export const WORK_CENTER_MAX_RELIEF = GHOST.max
 
 /**
  * Where the relief ghosts land, given the candidates in rank order.
@@ -60,7 +91,7 @@ export function workCenterGhostTargets(
 ): Array<{ id: WorkCenterId; x: number; y: number; r: number }> {
   const slots = layoutGhostFan(
     candidateIds.length,
-    { x: FOCUS.x, y: FOCUS.y },
+    GHOST.origin,
     GHOST.radius,
     GHOST.r,
     GHOST.span,
@@ -166,7 +197,7 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
     STRIP.height,
   )
 
-  const chips: GroupChip[] = (detail?.groupHours ?? [])
+  const allChips: GroupChip[] = (detail?.groupHours ?? [])
     .map((group) => ({
       groupId: group.groupId,
       label: group.label,
@@ -174,14 +205,17 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
     }))
     .filter((chip) => chip.hours > 0)
     .sort((a, b) => b.hours - a.hours)
-    .slice(0, 8)
+  const chips = allChips.slice(0, CHIPS.max)
+  const chipOverflow = allChips.length - chips.length
+  const chipRows = Math.max(1, Math.ceil(chips.length / CHIPS.columns))
 
   const bands = collapseDowntime(detail?.downtimeByWeek ?? [])
   const oee = (detail?.oeeByWeek ?? []).slice(fromWeek, toWeek + 1)
-  const candidates = (relief ?? []).slice(0, 7)
+  const allCandidates = relief ?? []
+  const candidates = allCandidates.slice(0, GHOST.max)
   const ghosts = layoutGhostFan(
     candidates.length,
-    { x: FOCUS.x, y: FOCUS.y },
+    GHOST.origin,
     GHOST.radius,
     GHOST.r,
     GHOST.span,
@@ -217,6 +251,7 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
         <circle
           r={FOCUS.r + 6}
           className={styles.grab}
+          {...{ [DRAG_HANDLE_ATTRIBUTE]: 'workCenter' }}
           onPointerDown={onFocusPointerDown}
           onPointerEnter={() => onHover(workCenterId)}
           onPointerLeave={() => onHover(null)}
@@ -248,34 +283,39 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
         </text>
         {chips.length === 0 ? (
           <g>
-            <rect x={0} y={0} width={CHIPS.width} height={44} rx={8} className={styles.emptyPlate} />
+            <rect x={0} y={0} width={CHIPS.colWidth} height={44} rx={8} className={styles.emptyPlate} />
             <text className={styles.emptyBody} x={14} y={27}>
               {loading ? 'Loading composition…' : 'No load in this window.'}
             </text>
           </g>
         ) : (
           chips.map((chip, index) => {
-            const y = index * (CHIPS.rowHeight + CHIPS.gap)
+            // Column-major, so the biggest groups read straight down the left.
+            const row = index % chipRows
+            const column = Math.floor(index / chipRows)
+            const x = column * (CHIPS.colWidth + CHIPS.colGap)
+            const y = row * (CHIPS.rowHeight + CHIPS.rowGap)
             return (
-              <g key={chip.groupId} className={styles.chip} transform={`translate(0,${y})`}>
-                <rect width={CHIPS.width} height={CHIPS.rowHeight} rx={8} className={styles.chipPlate} />
+              <g key={chip.groupId} className={styles.chip} transform={`translate(${x},${y})`}>
+                <rect width={CHIPS.colWidth} height={CHIPS.rowHeight} rx={8} className={styles.chipPlate} />
                 <rect x={9} y={CHIPS.rowHeight / 2 - 6} width={4} height={12} rx={2} className={styles.chipGrip} />
                 <text className={styles.chipLabel} x={21} y={CHIPS.rowHeight / 2 + 4}>
-                  {chip.label}
+                  {truncate(chip.label, 19)}
                 </text>
                 <text
                   className={styles.chipHours}
-                  x={CHIPS.width - 12}
+                  x={CHIPS.colWidth - 11}
                   y={CHIPS.rowHeight / 2 + 4}
                   textAnchor="end"
                 >
                   {fmtHours(chip.hours, { compact: true })}
                 </text>
                 <rect
-                  width={CHIPS.width}
+                  width={CHIPS.colWidth}
                   height={CHIPS.rowHeight}
                   rx={8}
                   className={styles.grab}
+                  {...{ [DRAG_HANDLE_ATTRIBUTE]: 'group' }}
                   onPointerDown={(event) => onChipPointerDown(chip, event)}
                 >
                   <title>{`${chip.label} — ${fmtHours(chip.hours)} on ${code} in this window. Drag to move it.`}</title>
@@ -284,16 +324,28 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
             )
           })
         )}
+        {chipOverflow > 0 ? (
+          <text className={styles.sectionNote} y={chipRows * (CHIPS.rowHeight + CHIPS.rowGap) + 12}>
+            {`+${chipOverflow} smaller ${chipOverflow === 1 ? 'group' : 'groups'} not shown`}
+          </text>
+        ) : null}
       </g>
 
       {/* --- relief candidates as ghost nodes ------------------------------ */}
       <g>
-        <text className={styles.sectionLabel} x={FOCUS.x - 130} y={FOCUS.y + 128}>
+        <text className={styles.sectionLabel} x={RELIEF.labelX} y={RELIEF.labelY}>
           Relief candidates
         </text>
+        {candidates.length > 0 ? (
+          <text className={styles.sectionNote} x={RELIEF.labelX} y={RELIEF.noteY}>
+            {allCandidates.length > candidates.length
+              ? `Best ${candidates.length} of ${allCandidates.length} — drop load on one to move it`
+              : `${candidates.length} found — drop load on one to move it`}
+          </text>
+        ) : null}
         {candidates.length === 0 ? (
-          <g transform={`translate(${FOCUS.x - 130},${FOCUS.y + 142})`}>
-            <rect width={300} height={46} rx={10} className={styles.emptyPlate} />
+          <g transform={`translate(${RELIEF.labelX},${RELIEF.noteY - 8})`}>
+            <rect width={330} height={46} rx={10} className={styles.emptyPlate} />
             <text className={styles.emptyBody} x={14} y={28}>
               {loading ? 'Searching the network…' : 'Nothing else in the network can take this load.'}
             </text>
@@ -328,10 +380,10 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
                     size={15}
                   />
                 </g>
-                <text className={styles.ghostNote} y={slot.r + 15} textAnchor="middle">
+                <text className={styles.ghostNote} y={slot.r + 14} textAnchor="middle">
                   {presentation.label}
                 </text>
-                <text className={styles.ghostNote} y={slot.r + 27} textAnchor="middle">
+                <text className={styles.ghostNote} y={slot.r + 26} textAnchor="middle">
                   {candidate.basis === 'retrofit'
                     ? `${usd(candidate.capexUsd, { compact: true })} · ${candidate.leadTimeWeeks} wk`
                     : `${fmtHours(candidate.spareHours, { compact: true })} spare`}
@@ -441,6 +493,15 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
           <text className={styles.sectionLabel} y={-8}>
             Planned downtime
           </text>
+          {bands.length > 0 ? (
+            <text className={styles.sectionNote} x={PANEL.width} y={-8} textAnchor="end">
+              {`${bands.length} dated ${bands.length === 1 ? 'event' : 'events'} \u00b7 ` +
+                `${fmtHours(
+                  bands.reduce((total, band) => total + band.hours, 0),
+                  { compact: true },
+                )} removed \u00b7 hover a band for its dates`}
+            </text>
+          ) : null}
           <rect width={PANEL.width} height={DOWNTIME.height} rx={6} className={styles.downtimeTrack} />
           {bands.length === 0 ? (
             <text className={styles.emptyBodySmall} x={10} y={DOWNTIME.height / 2 + 4}>
@@ -451,12 +512,18 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
               const span = Math.max(1, toWeek - fromWeek + 1)
               const x = ((band.fromWeek - fromWeek) / span) * PANEL.width
               const width = Math.max(4, ((band.toWeek - band.fromWeek + 1) / span) * PANEL.width)
+              // A label wider than its own band prints over its neighbour's,
+              // which is how "maintenance qualification" became "maintenqualifn".
+              // The band keeps its tooltip; only the caption is dropped.
+              const caption = width >= band.kind.length * 5.6 + 14 ? band.kind : null
               return (
                 <g key={`${band.label}-${band.fromWeek}`}>
                   <rect x={x} y={0} width={width} height={DOWNTIME.height} rx={5} className={styles.downtimeBand} />
-                  <text className={styles.downtimeLabel} x={x + 7} y={DOWNTIME.height / 2 + 4}>
-                    {band.kind}
-                  </text>
+                  {caption === null ? null : (
+                    <text className={styles.downtimeLabel} x={x + 7} y={DOWNTIME.height / 2 + 4}>
+                      {caption}
+                    </text>
+                  )}
                   <title>{`${band.label} (${band.kind}) — ${weekLabel(band.fromWeek)} to ${weekLabel(band.toWeek)}, ${fmtHours(band.hours)} removed.`}</title>
                 </g>
               )
@@ -482,6 +549,11 @@ export const WorkCenterLayer = memo(function WorkCenterLayer({
     </g>
   )
 })
+
+/** SVG has no text-overflow. A label that would run into its own value is cut. */
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`
+}
 
 /**
  * OEE over the window. One 2px line, its own y-axis banded to the values it

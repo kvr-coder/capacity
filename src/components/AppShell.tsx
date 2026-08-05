@@ -28,6 +28,7 @@ import { useUiStore } from '@/state/store'
 import { Badge, Icon, IconButton, Select, ToastProvider, Tooltip, useToast } from '@/components/ui'
 import type { IconName } from '@/components/ui'
 import { CommandBar, commandShortcutLabel, openCommandBar } from '@/components/CommandBar'
+import { HelpMenu, openHelpMenu } from '@/components/HelpMenu'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import styles from '@/components/AppShell.module.css'
 
@@ -276,6 +277,10 @@ function ShellHeader() {
         <kbd className={styles.kbd}>{shortcut}</kbd>
       </button>
 
+      <Tooltip placement="bottom" content="Help & guide — what this tool is for, and how to use it">
+        <IconButton icon="help" size="sm" label="Help & guide" onClick={() => openHelpMenu()} />
+      </Tooltip>
+
       <ThemeToggle />
     </header>
   )
@@ -361,6 +366,7 @@ function ShellBody() {
       </div>
 
       <CommandBar />
+      <HelpMenu />
       <NoticeBridge />
     </div>
   )
