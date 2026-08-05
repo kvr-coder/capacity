@@ -77,6 +77,8 @@ import type {
   WorkCenterId,
 } from '@/domain/types'
 import type { SnapshotIndexes } from '@/domain/indexes'
+import { buildIndexes } from '@/domain/indexes'
+import { buildOeeGrid } from '@/domain/oee'
 import { at, key } from '@/domain/lookup'
 
 /** Beyond this the warning list stops being read and starts being scrolled. */
@@ -453,6 +455,12 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
   const ordered = [...scenario.moves].sort((a, b) => a.seq - b.seq)
   /** Move ids switched off because they would produce a plan nobody could run. */
   const disabled = new Set<string>()
+  /**
+   * Glide paths this scenario introduced, kept so the end of the replay can
+   * check whether any of them puts OEE BELOW what would otherwise resolve. A
+   * glide is allowed to model a regression — but never silently.
+   */
+  const scenarioGlides: Array<{ path: OeeGlidePath; label: string }> = []
   /** Enabled retrofit moves by target work center — resourceMove validation reads this. */
   const retrofitTargets = new Set<WorkCenterId>()
   for (const entry of ordered) {
@@ -523,6 +531,9 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
           fromWeek: move.fromWeek,
           toWeek: move.toWeek,
           note: label,
+          // Provenance: a logged decision, not master data. `oee.ts` ranks this
+          // above every seeded override whatever its scope or window.
+          source: 'scenario',
         }
         // The cascade takes the LAST matching entry, so appending is exactly
         // "this decision beats the ones before it".
@@ -531,7 +542,11 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
       }
 
       case 'oeeGlide': {
-        glidePathsOf(working).push({ ...move.path })
+        // `source: 'scenario'` is what makes this ramp beat a seeded plant
+        // programme with a later fromWeek. Without it the planner's own path
+        // loses to background master data.
+        glidePathsOf(working).push({ ...move.path, source: 'scenario' })
+        scenarioGlides.push({ path: move.path, label })
         break
       }
 
@@ -675,6 +690,9 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
             value: baseOee + option.oeeDelta,
             fromWeek: clampWeek(move.availableFromWeek, weekCount),
             note: `${label}: ${option.name}`,
+            // A retrofit is a logged decision too — the OEE it buys must not be
+            // overridden by seeded master data at a narrower scope.
+            source: 'scenario',
           })
         }
 
@@ -837,6 +855,9 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
     }
   }
 
+  const snapshot = finish(working)
+  for (const message of glideRegressionWarnings(snapshot, scenarioGlides)) warn(message)
+
   if (suppressed > 0) warnings.push(`…and ${suppressed} more move warning(s).`)
 
   const effectiveScenario: Scenario =
@@ -849,7 +870,70 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
           ),
         }
 
-  return { snapshot: finish(working), capexUsd, warnings, effectiveScenario, freightUsd }
+  return { snapshot, capexUsd, warnings, effectiveScenario, freightUsd }
+}
+
+/**
+ * Every scenario glide path that puts resolved OEE BELOW what the same week
+ * would resolve to without any scenario glide at all.
+ *
+ * Modelling a regression is legitimate — a line that is about to be rebuilt
+ * really does get worse before it gets better — so this does not disable
+ * anything. It refuses to let it happen quietly: the usual way to land here is
+ * an explicit start value typed under a target far above it, which produces a
+ * label that reads like an improvement while lowering the early weeks.
+ *
+ * Two grids at 150 x 78 doubles, built only when the scenario actually carries
+ * a glide. Where a scenario carries several overlapping glides the count is
+ * attributed to each path covering the cell, because unpicking which of two
+ * deliberate ramps "caused" a lower week is guesswork.
+ */
+function glideRegressionWarnings(
+  snapshot: Snapshot,
+  glides: ReadonlyArray<{ path: OeeGlidePath; label: string }>,
+): string[] {
+  if (glides.length === 0) return []
+  const idx = buildIndexes(snapshot)
+  const weekCount = idx.weekCount
+  const withGlides = buildOeeGrid(snapshot, idx)
+  const without = buildOeeGrid(
+    { ...snapshot, glidePaths: snapshot.glidePaths.filter((p) => p.source !== 'scenario') },
+    idx,
+  )
+
+  const messages: string[] = []
+  for (const { path, label } of glides) {
+    const workCenterIds =
+      path.scope === 'workCenter' && path.workCenterId !== undefined
+        ? [path.workCenterId]
+        : (idx.workCentersByPlant.get(path.plantId ?? ('' as PlantId)) ?? []).map((wc) => wc.id)
+
+    let below = 0
+    let cells = 0
+    let worst = 0
+    for (const wcId of workCenterIds) {
+      const row = idx.workCenterRow.get(wcId)
+      if (row === undefined) continue
+      for (let w = 0; w < weekCount; w += 1) {
+        const a = withGlides[row * weekCount + w] ?? 0
+        const b = without[row * weekCount + w] ?? 0
+        cells += 1
+        if (a < b - 1e-9) {
+          below += 1
+          worst = Math.max(worst, b - a)
+        }
+      }
+    }
+    if (below === 0) continue
+    const start =
+      path.startValue === undefined
+        ? ''
+        : ` Its explicit start value of ${(path.startValue * 100).toFixed(1)}% is below the OEE those work centers already resolve to — leave the start value unset to ramp from wherever they are today.`
+    messages.push(
+      `oeeGlide "${label}" LOWERS OEE: the path "${path.label}" puts ${below} of ${cells} work-center weeks below what would otherwise resolve, by up to ${(worst * 100).toFixed(1)}pp.${start}`,
+    )
+  }
+  return messages
 }
 
 // ---------------------------------------------------------------------------
@@ -896,6 +980,38 @@ function selectorLabel(idx: SnapshotIndexes, selector: MaterialSelector): string
       return idx.familyById.get(selector.id)?.name ?? selector.id
     }
   }
+}
+
+/**
+ * Roughly what the work centers a glide path covers run at today: the mean of
+ * their own `baseOee`, falling back to the plant default.
+ *
+ * Deliberately the BASE of the cascade and not the resolved value — overrides
+ * and other glide paths are dated, and this is used to caption a path, not to
+ * compute with. It is right to within a couple of points, which is all a
+ * "you are starting BELOW where you are" caption needs.
+ */
+export function scopeBaseOee(
+  idx: SnapshotIndexes,
+  path: Pick<OeeGlidePath, 'scope' | 'plantId' | 'workCenterId'>,
+): number | undefined {
+  const centers =
+    path.scope === 'workCenter'
+      ? path.workCenterId === undefined
+        ? []
+        : [idx.workCenterById.get(path.workCenterId)].filter((wc) => wc !== undefined)
+      : (idx.workCentersByPlant.get(path.plantId ?? ('' as PlantId)) ?? []).slice()
+  let sum = 0
+  let n = 0
+  for (const wc of centers) {
+    const fallback = idx.plantById.get(wc.plantId)?.defaultOee ?? FALLBACK_OEE
+    const value = wc.baseOee > 0 ? wc.baseOee : fallback
+    sum += value
+    n += 1
+  }
+  if (n > 0) return sum / n
+  const plantDefault = path.plantId === undefined ? undefined : idx.plantById.get(path.plantId)?.defaultOee
+  return plantDefault !== undefined && plantDefault > 0 ? plantDefault : undefined
 }
 
 function retrofitOptionOf(
@@ -946,8 +1062,23 @@ export function describeMove(move: Move, idx: SnapshotIndexes): string {
           : workCenterLabel(idx, path.workCenterId ?? '')
       const shape =
         path.curve === 'sCurve' ? 'on an S-curve' : path.curve === 'step' ? 'as a step' : 'linearly'
-      const start = path.startValue === undefined ? 'today’s OEE' : pct1(path.startValue)
-      return `Ramp OEE at ${where} from ${start} to ${pct1(path.endValue)} ${shape}, ${weekSpan(path.fromWeek, path.toWeek)} — ${path.label}`
+      // A stated start below where the scope runs today is a REGRESSION for the
+      // early weeks, however improving the headline "70% to 98%" reads. The
+      // label must never be the improving reading of a decline — a planner who
+      // means to model bad news should see it, and one who does not should
+      // catch their own mistake here rather than in the KPIs.
+      const today = scopeBaseOee(idx, path)
+      const startsBelow =
+        path.startValue !== undefined && today !== undefined && path.startValue < today - 0.005
+      const endsBelow = today !== undefined && path.endValue < today - 0.005
+      const start =
+        path.startValue === undefined
+          ? 'today’s OEE'
+          : startsBelow && today !== undefined
+            ? `${pct1(path.startValue)} (below the current ${pct1(today)})`
+            : pct1(path.startValue)
+      const verb = endsBelow ? 'Decline OEE at' : startsBelow ? 'Ramp OEE DOWN then up at' : 'Ramp OEE at'
+      return `${verb} ${where} from ${start} to ${pct1(path.endValue)} ${shape}, ${weekSpan(path.fromWeek, path.toWeek)} — ${path.label}`
     }
 
     case 'rateSet':

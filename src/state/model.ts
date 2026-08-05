@@ -37,7 +37,7 @@ import type {
   Scenario,
   WorkCenterId,
 } from '@/domain/types'
-import type { MaterialSliceRow, WorkCenterDetail } from '@/worker/protocol'
+import type { MaterialSliceRow, RateQuote, WorkCenterDetail } from '@/worker/protocol'
 import { at } from '@/domain/lookup'
 import { getEngineClient, isSuperseded } from '@/worker/client'
 import { useActiveScenario, useUiStore } from '@/state/store'
@@ -358,6 +358,46 @@ export function useMaterialSlice(
     })
     return { rows: response.rows, total: response.total }
   })
+}
+
+/**
+ * What one (material, work center, operation) runs at TODAY — the number a
+ * `rateSet` move is authored AGAINST.
+ *
+ * Routings, production versions, rate overrides and the OEE cascade all live in
+ * the worker, so the main thread cannot resolve a rate itself. It used to not
+ * try: the form defaulted the field to a hardcoded 100 eaches/hour against real
+ * rates spanning 150–3000. This hook is that default's replacement, and it
+ * re-asks whenever any of the three selections changes — a value fetched for a
+ * different SKU is the same lie as a constant, only better disguised.
+ *
+ * An empty material parks the hook: there is nothing to resolve yet.
+ */
+export function useResolvedRate(
+  material: string,
+  workCenterId: WorkCenterId,
+  opId: string,
+  week: number,
+): Query<RateQuote> {
+  const scenario = useActiveScenario()
+  const filters = useUiStore((state) => state.filters)
+  const ready = useEngineReady()
+  const trimmed = material.trim()
+  const key =
+    ready && trimmed !== '' && workCenterId !== '' && opId !== ''
+      ? ['rate', trimmed, workCenterId, opId, week, scenarioFingerprint(scenario)].join('|')
+      : ''
+
+  return useWorkerQuery('resolveRate', key, () =>
+    getEngineClient().resolveRate({
+      scenario,
+      filters,
+      material: trimmed,
+      workCenterId,
+      opId,
+      week,
+    }),
+  )
 }
 
 // ---------------------------------------------------------------------------

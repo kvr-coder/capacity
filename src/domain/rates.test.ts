@@ -9,7 +9,7 @@ import type {
   WorkCenter,
 } from '@/domain/types'
 import { buildIndexes } from '@/domain/indexes'
-import { resolveOperation } from '@/domain/rates'
+import { findMaterial, findRoutingOperation, quoteRate, resolveOperation } from '@/domain/rates'
 import { buildTimeGrid } from '@/domain/time'
 import { at } from '@/domain/lookup'
 
@@ -338,5 +338,135 @@ describe('the material guard on the alternate and override lookups is exact', ()
     })
     const idx = buildIndexes(snap)
     expect(resolveOperation(snap, idx, 'M1', firstOp(snap), 1).ratePerHour).toBeCloseTo(50, 10)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Quoting the current rate — what a `rateSet` move is authored against
+// ---------------------------------------------------------------------------
+
+describe('quoteRate', () => {
+  it('quotes the NOMINAL rate, and the effective rate beside it', () => {
+    const snap = snapshot()
+    const quote = quoteRate(snap, buildIndexes(snap), 'M1', 'WC1', 'OP-A', 0.8)
+    expect(quote.status).toBe('resolved')
+    // 100 units in 2 hours, before OEE. A `rateSet` move sets THIS number.
+    expect(quote.ratePerHour).toBeCloseTo(50, 10)
+    expect(quote.effectiveRatePerHour).toBeCloseTo(40, 10)
+    expect(quote.oee).toBeCloseTo(0.8, 10)
+    expect(quote.fromOverride).toBe(false)
+    expect(quote.materialId).toBe('M1')
+    expect(quote.materialCode).toBe('M-0001')
+  })
+
+  it('accepts the SKU CODE a planner types, not only the id', () => {
+    const snap = snapshot()
+    const byCode = quoteRate(snap, buildIndexes(snap), ' M-0001 ', 'WC1', 'OP-A', 1)
+    expect(byCode.status).toBe('resolved')
+    expect(byCode.materialId).toBe('M1')
+    expect(byCode.ratePerHour).toBeCloseTo(50, 10)
+  })
+
+  it('walks the same resolution order as the engine', () => {
+    const alternate = routing({
+      id: 'R2',
+      version: '0002',
+      primary: false,
+      operations: [op({ machineHoursPerBase: 1.25 })],
+    })
+    const withAlternate = snapshot({ routings: [routing(), alternate] })
+    expect(
+      quoteRate(withAlternate, buildIndexes(withAlternate), 'M1', 'WC1', 'OP-A', 1).ratePerHour,
+    ).toBeCloseTo(80, 10)
+
+    const withOverride = snapshot({
+      routings: [routing(), alternate],
+      rateOverrides: [{ materialId: 'M1', workCenterId: 'WC1', opId: 'OP-A', ratePerHour: 120 }],
+    })
+    const quote = quoteRate(withOverride, buildIndexes(withOverride), 'M1', 'WC1', 'OP-A', 1)
+    expect(quote.ratePerHour).toBeCloseTo(120, 10)
+    // Worth saying out loud in the form: this SKU is already overridden here.
+    expect(quote.fromOverride).toBe(true)
+  })
+
+  it('finds an operation that only an alternate version carries', () => {
+    const alternate = routing({
+      id: 'R2',
+      version: '0002',
+      primary: false,
+      operations: [op({ opId: 'OP-B', machineHoursPerBase: 4 })],
+    })
+    const snap = snapshot({ routings: [routing(), alternate] })
+    const quote = quoteRate(snap, buildIndexes(snap), 'M1', 'WC1', 'OP-B', 1)
+    expect(quote.status).toBe('resolved')
+    expect(quote.ratePerHour).toBeCloseTo(25, 10)
+  })
+
+  it('says so rather than inventing a number when nothing resolves', () => {
+    const snap = snapshot()
+    const idx = buildIndexes(snap)
+
+    const unknownSku = quoteRate(snap, idx, 'NOT-A-SKU', 'WC1', 'OP-A', 1)
+    expect(unknownSku.status).toBe('unknownMaterial')
+    expect(unknownSku.ratePerHour).toBeNull()
+
+    const empty = quoteRate(snap, idx, '   ', 'WC1', 'OP-A', 1)
+    expect(empty.status).toBe('unknownMaterial')
+
+    const wrongOp = quoteRate(snap, idx, 'M1', 'WC1', 'OP-Z', 1)
+    expect(wrongOp.status).toBe('noOperation')
+    expect(wrongOp.ratePerHour).toBeNull()
+
+    const wrongWc = quoteRate(snap, idx, 'M1', 'WC-NOWHERE', 'OP-A', 1)
+    expect(wrongWc.status).toBe('noOperation')
+    expect(wrongWc.ratePerHour).toBeNull()
+
+    const dead = snapshot({ routings: [routing({ operations: [op({ machineHoursPerBase: 0 })] })] })
+    const noRate = quoteRate(dead, buildIndexes(dead), 'M1', 'WC1', 'OP-A', 1)
+    expect(noRate.status).toBe('noRate')
+    expect(noRate.ratePerHour).toBeNull()
+  })
+
+  it('a dead OEE still quotes the nominal rate — the two knobs are independent', () => {
+    const snap = snapshot()
+    const quote = quoteRate(snap, buildIndexes(snap), 'M1', 'WC1', 'OP-A', 0)
+    expect(quote.status).toBe('resolved')
+    expect(quote.ratePerHour).toBeCloseTo(50, 10)
+    expect(quote.effectiveRatePerHour).toBe(0)
+    expect(quote.oee).toBeNull()
+  })
+
+  it('the quoted rate is the one the engine would use for the same triple', () => {
+    const snap = snapshot({
+      rateOverrides: [{ materialId: 'M1', workCenterId: 'WC1', opId: 'OP-A', ratePerHour: 137 }],
+    })
+    const idx = buildIndexes(snap)
+    const engine = resolveOperation(snap, idx, 'M1', firstOp(snap), 0.75)
+    const quote = quoteRate(snap, idx, 'M1', 'WC1', 'OP-A', 0.75)
+    expect(quote.ratePerHour).toBeCloseTo(engine.ratePerHour, 10)
+    expect(quote.effectiveRatePerHour).toBeCloseTo(engine.effectiveRatePerHour, 10)
+  })
+})
+
+describe('findMaterial / findRoutingOperation', () => {
+  it('resolves by id first, then by code', () => {
+    const snap = snapshot()
+    const idx = buildIndexes(snap)
+    expect(findMaterial(snap, idx, 'M1')).toBe('M1')
+    expect(findMaterial(snap, idx, 'M-0001')).toBe('M1')
+    expect(findMaterial(snap, idx, 'nope')).toBeUndefined()
+    expect(findMaterial(snap, idx, '')).toBeUndefined()
+  })
+
+  it('prefers the primary version’s operation', () => {
+    const alternate = routing({
+      id: 'R2',
+      version: '0002',
+      primary: false,
+      operations: [op({ machineHoursPerBase: 1.25 })],
+    })
+    const snap = snapshot({ routings: [routing(), alternate] })
+    const found = findRoutingOperation(buildIndexes(snap), 'M1', 'WC1', 'OP-A')
+    expect(found).toBe(firstOp(snap))
   })
 })

@@ -40,12 +40,63 @@ import { ErrorState } from '@/components/ui'
  * accepted. Six screens are written by six different hands against this router;
  * a mismatch in export style should be a non-event, not a blank page.
  */
+/**
+ * Key for the one-shot reload guard below. Kept in sessionStorage so a genuine
+ * broken build cannot put the tab into an infinite refresh loop — we retry
+ * once per session and then surface the error honestly.
+ */
+const RELOAD_KEY = 'capacity-cockpit/chunk-reload'
+
+/** sessionStorage throws in some privacy modes; a failed reload guard must
+ *  never be the thing that takes the app down. */
+function reloadGuard(): { taken: boolean; take: () => void; clear: () => void } {
+  try {
+    return {
+      taken: sessionStorage.getItem(RELOAD_KEY) !== null,
+      take: () => sessionStorage.setItem(RELOAD_KEY, '1'),
+      clear: () => sessionStorage.removeItem(RELOAD_KEY),
+    }
+  } catch {
+    // No storage: treat the guard as already spent so we never loop.
+    return { taken: true, take: () => {}, clear: () => {} }
+  }
+}
+
+/**
+ * True when a dynamic import failed because the chunk is gone rather than
+ * because the module threw. That happens on every redeploy: the browser is
+ * holding an `index.html` that references content-hashed chunk names, the new
+ * deploy replaced them, and the old names now 404. The user did nothing wrong
+ * and there is nothing to fix in their session except fetch the new index.
+ */
+function isStaleChunkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /dynamically imported module|Importing a module script failed|Failed to fetch/i.test(
+    message,
+  )
+}
+
 function screen(
   load: () => Promise<unknown>,
   name: string,
 ): LazyExoticComponent<ComponentType> {
   return lazy(async () => {
-    const loaded = await load()
+    const loaded = await load().catch((error: unknown) => {
+      // A redeploy landed while this tab was open. Reload once to pick up the
+      // new index.html and its chunk names; if it fails again, fall through to
+      // the error boundary rather than looping.
+      const guard = reloadGuard()
+      if (isStaleChunkError(error) && !guard.taken) {
+        guard.take()
+        window.location.reload()
+        // Never resolves — the reload replaces the page.
+        return new Promise<unknown>(() => {})
+      }
+      throw error
+    })
+    // Got a chunk, so whatever went wrong before is over: re-arm the guard for
+    // the next deploy this tab lives through.
+    reloadGuard().clear()
     if (typeof loaded !== 'object' || loaded === null) {
       throw new Error(`The ${name} screen module did not load.`)
     }

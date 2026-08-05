@@ -4,11 +4,13 @@ import type {
   OeeOverride,
   Plant,
   PoolCapacity,
+  Scenario,
   Snapshot,
   WorkCenter,
 } from '@/domain/types'
 import { buildIndexes } from '@/domain/indexes'
 import { OEE_MAX, OEE_MIN, buildOeeGrid, evaluateGlide, resolveOee } from '@/domain/oee'
+import { applyMoves, describeMove } from '@/domain/moves'
 import { buildTimeGrid } from '@/domain/time'
 
 const WEEKS = 12
@@ -297,5 +299,214 @@ describe('clamping and bounds', () => {
     expect(grid[row2 * WEEKS]).toBeCloseTo(0.6, 10)
     expect(() => resolveOee(snap, idx, grid, 'WC1', undefined, WEEKS)).toThrow(/outside the horizon/)
     expect(() => resolveOee(snap, idx, grid, 'NOPE', undefined, 0)).toThrow(/not in the grid/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Provenance
+// ---------------------------------------------------------------------------
+
+describe('provenance beats the fromWeek rule', () => {
+  it('lets a scenario glide beat a seeded glide with a LATER fromWeek', () => {
+    // Exactly the shipped shape of the bug: master data ramps the plant from
+    // W4, the planner ramps the same plant from W0, and the planner's path was
+    // silently overridden for every week from W4 on.
+    const snap = snapshot({
+      workCenters: [workCenter('WC1', 'P1', 0.8)],
+      glidePaths: [
+        path({
+          id: 'SEEDED',
+          scope: 'plant',
+          plantId: 'P1',
+          workCenterId: undefined,
+          startValue: 0.5,
+          endValue: 0.6,
+          fromWeek: 4,
+          toWeek: 8,
+          source: 'master',
+        }),
+        path({
+          id: 'USER',
+          scope: 'plant',
+          plantId: 'P1',
+          workCenterId: undefined,
+          startValue: 0.7,
+          endValue: 0.9,
+          fromWeek: 0,
+          toWeek: 10,
+          source: 'scenario',
+        }),
+      ],
+    })
+    expect(oeeAt(snap, 0)).toBeCloseTo(0.7, 10)
+    // W4 is where the seeded path used to take over. It no longer does.
+    expect(oeeAt(snap, 4)).toBeCloseTo(0.78, 10)
+    expect(oeeAt(snap, 10)).toBeCloseTo(0.9, 10)
+    expect(oeeAt(snap, 11)).toBeCloseTo(0.9, 10)
+  })
+
+  it('keeps the greatest-fromWeek rule inside one provenance tier', () => {
+    const snap = snapshot({
+      glidePaths: [
+        path({ id: 'S1', startValue: 0.5, endValue: 0.9, fromWeek: 0, toWeek: 10, source: 'scenario' }),
+        path({ id: 'S2', startValue: 0.4, endValue: 0.6, fromWeek: 4, toWeek: 8, source: 'scenario' }),
+      ],
+    })
+    expect(oeeAt(snap, 2)).toBeCloseTo(0.58, 10)
+    expect(oeeAt(snap, 4)).toBeCloseTo(0.4, 10)
+    expect(oeeAt(snap, 9)).toBeCloseTo(0.6, 10)
+  })
+
+  it('treats an unstamped path as master data, so old snapshots behave as before', () => {
+    const snap = snapshot({
+      glidePaths: [
+        path({ id: 'A', startValue: 0.5, endValue: 0.9, fromWeek: 0, toWeek: 10 }),
+        path({ id: 'B', startValue: 0.4, endValue: 0.6, fromWeek: 4, toWeek: 8 }),
+      ],
+    })
+    expect(oeeAt(snap, 4)).toBeCloseTo(0.4, 10)
+  })
+
+  it('lets a scenario PLANT override beat a seeded WORK CENTER override', () => {
+    // The same defeat in the override cascade: specificity used to be applied
+    // before provenance, so a seeded work-center row beat the planner's own
+    // plant-wide oeeSet.
+    const snap = snapshot({
+      oeeOverrides: [
+        { scope: 'workCenter', workCenterId: 'WC1', value: 0.5 },
+        { scope: 'plant', plantId: 'P1', value: 0.85, source: 'scenario' },
+      ],
+    })
+    expect(oeeAt(snap, 0)).toBeCloseTo(0.85, 10)
+  })
+
+  it('still prefers the more specific override when both are master data', () => {
+    const snap = snapshot({
+      oeeOverrides: [
+        { scope: 'plant', plantId: 'P1', value: 0.85 },
+        { scope: 'workCenter', workCenterId: 'WC1', value: 0.5 },
+      ],
+    })
+    expect(oeeAt(snap, 0)).toBeCloseTo(0.5, 10)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A glide may model a decline — but never silently
+// ---------------------------------------------------------------------------
+
+function glideScenario(p: OeeGlidePath): Scenario {
+  return {
+    id: 'S',
+    name: 'S',
+    description: '',
+    colorSlot: 2,
+    moves: [{ id: 'm1', label: 'the ramp', enabled: true, seq: 1, move: { kind: 'oeeGlide', path: p } }],
+  }
+}
+
+describe('a scenario glide against the OEE it starts from', () => {
+  const base = (): Snapshot =>
+    snapshot({
+      workCenters: [workCenter('WC1', 'P1', 0.8), workCenter('WC2', 'P1', 0.75)],
+      glidePaths: [
+        path({
+          id: 'SEEDED',
+          scope: 'plant',
+          plantId: 'P1',
+          workCenterId: undefined,
+          startValue: 0.6,
+          endValue: 0.65,
+          fromWeek: 6,
+          toWeek: 9,
+        }),
+      ],
+    })
+
+  it('never lowers OEE when the path states no start value', () => {
+    const snap = base()
+    const applied = applyMoves(
+      snap,
+      glideScenario(
+        path({
+          id: 'USER',
+          scope: 'plant',
+          plantId: 'P1',
+          workCenterId: undefined,
+          startValue: undefined,
+          endValue: 0.95,
+          fromWeek: 0,
+          toWeek: 11,
+        }),
+      ),
+    )
+    const idx = buildIndexes(applied.snapshot)
+    const grid = buildOeeGrid(applied.snapshot, idx)
+    // The seeded W6 path used to drag both work centers down to 0.6. It no
+    // longer wins, and the ramp starts from where each one already sits.
+    for (const [wcId, start] of [['WC1', 0.8], ['WC2', 0.75]] as const) {
+      for (let w = 0; w < WEEKS; w += 1) {
+        expect(resolveOee(applied.snapshot, idx, grid, wcId, undefined, w)).toBeGreaterThanOrEqual(
+          start - 1e-9,
+        )
+      }
+    }
+    expect(applied.warnings.filter((m) => m.includes('LOWERS OEE'))).toHaveLength(0)
+  })
+
+  it('ACCEPTS a deliberate decline, applies it unclamped, and warns', () => {
+    // Forecasting a drop — an ageing asset, a learning curve — is legitimate
+    // planning. It must not be rejected or clamped back up to today's value.
+    const snap = base()
+    const decline = path({
+      id: 'USER',
+      scope: 'plant',
+      plantId: 'P1',
+      workCenterId: undefined,
+      startValue: 0.7,
+      endValue: 0.95,
+      fromWeek: 0,
+      toWeek: 11,
+      label: 'learning curve on the new tool',
+    })
+    const applied = applyMoves(snap, glideScenario(decline))
+    const idx = buildIndexes(applied.snapshot)
+    const grid = buildOeeGrid(applied.snapshot, idx)
+
+    // Applied, not rejected: week 0 really is the 70% the planner typed, which
+    // is BELOW the 80% WC1 otherwise resolves to.
+    expect(resolveOee(applied.snapshot, idx, grid, 'WC1', undefined, 0)).toBeCloseTo(0.7, 10)
+    expect(resolveOee(applied.snapshot, idx, grid, 'WC1', undefined, 11)).toBeCloseTo(0.95, 10)
+
+    // And announced.
+    const warned = applied.warnings.filter((m) => m.includes('LOWERS OEE'))
+    expect(warned).toHaveLength(1)
+    expect(warned[0]).toContain('learning curve on the new tool')
+    expect(warned[0]).toMatch(/\d+ of \d+ work-center weeks/)
+
+    // The auto-generated label must not read as an unqualified improvement.
+    const label = describeMove({ kind: 'oeeGlide', path: decline }, buildIndexes(snap))
+    expect(label).toContain('below the current')
+    expect(label).not.toMatch(/^Ramp OEE at [^—]*from 70\.0% to/)
+  })
+
+  it('calls a path that ends below today a decline, not a ramp', () => {
+    const snap = base()
+    const label = describeMove(
+      {
+        kind: 'oeeGlide',
+        path: path({
+          scope: 'plant',
+          plantId: 'P1',
+          workCenterId: undefined,
+          startValue: undefined,
+          endValue: 0.6,
+          fromWeek: 0,
+          toWeek: 11,
+        }),
+      },
+      buildIndexes(snap),
+    )
+    expect(label.startsWith('Decline OEE at')).toBe(true)
   })
 })

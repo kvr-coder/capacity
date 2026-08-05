@@ -37,6 +37,8 @@
 
 import type {
   MaterialId,
+  OperationId,
+  Routing,
   RoutingOperation,
   Snapshot,
   WorkCenterId,
@@ -208,5 +210,147 @@ export function resolveOperation(
     labourHoursPerUnit,
     setupHours,
     yield: yieldValue,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Quoting the CURRENT rate — what the move editor starts a `rateSet` from
+// ---------------------------------------------------------------------------
+
+/**
+ * Why this lives here rather than in the form.
+ *
+ * A `rateSet` move overwrites the rate for one (material, work center,
+ * operation). The number the planner is adjusting FROM is the output of the
+ * three-step resolution above, and every input to it — routings, production
+ * versions, rate overrides, OEE — lives in the worker's snapshot. The main
+ * thread holds none of it, so the form used to default the field to a
+ * hardcoded 100 eaches/hour against real rates spanning 150–3000. That is the
+ * same trap the glide-path start value fell into: a field that reads as
+ * "current" and is in fact unrelated to the entity selected.
+ *
+ * The answer is one triple's worth of numbers, fetched on demand, which is why
+ * this is a request rather than an extra table on the catalog: a full rate
+ * table is 15,000 materials x their operations and is not bounded.
+ */
+export type RateQuoteStatus = 'resolved' | 'unknownMaterial' | 'noOperation' | 'noRate'
+
+export interface RateQuote {
+  /**
+   * `resolved` is the only status carrying a rate. Everything else means the
+   * form must say so and leave the field alone rather than invent a number.
+   */
+  status: RateQuoteStatus
+  /** The canonical id, even when the planner typed the code. */
+  materialId: MaterialId | null
+  materialCode: string | null
+  /** NOMINAL eaches/hour, before OEE — the knob a `rateSet` move turns. */
+  ratePerHour: number | null
+  /** ratePerHour x OEE. Shown BESIDE the nominal, never in place of it. */
+  effectiveRatePerHour: number | null
+  oee: number | null
+  /** True when the nominal rate already comes from an existing rate override. */
+  fromOverride: boolean
+}
+
+const UNRESOLVED: Omit<RateQuote, 'status' | 'materialId' | 'materialCode'> = {
+  ratePerHour: null,
+  effectiveRatePerHour: null,
+  oee: null,
+  fromOverride: false,
+}
+
+/**
+ * A material by its id, or failing that by its `code`.
+ *
+ * The move editor asks for a SKU by code, because a code is what is printed on
+ * a router and an id is not. Accepting either here is what stops a typed code
+ * from silently resolving to nothing.
+ */
+export function findMaterial(
+  snap: Snapshot,
+  idx: SnapshotIndexes,
+  reference: string,
+): MaterialId | undefined {
+  const trimmed = reference.trim()
+  if (trimmed === '') return undefined
+  if (idx.materialById.has(trimmed)) return trimmed
+  for (const material of snap.materials) {
+    if (material.code === trimmed) return material.id
+  }
+  return undefined
+}
+
+/**
+ * The routing operation for one (material, work center, operation).
+ *
+ * The primary production version is searched first, so `resolveOperation` gets
+ * the operation it expects and applies the alternate-version step itself. Only
+ * when the primary does not carry the operation at all does an alternate stand
+ * in — that is a real case (an operation that exists on one version only) and
+ * a missing answer would read as "this SKU never runs here".
+ */
+export function findRoutingOperation(
+  idx: SnapshotIndexes,
+  materialId: MaterialId,
+  workCenterId: WorkCenterId,
+  opId: OperationId,
+): RoutingOperation | undefined {
+  const plantId = plantOf(idx, workCenterId)
+  if (plantId === undefined) return undefined
+  const pairKey = key(materialId, plantId)
+  const match = (routing: Routing): RoutingOperation | undefined =>
+    routing.operations.find((op) => op.opId === opId && op.workCenterId === workCenterId)
+  const primary = idx.primaryRouting.get(pairKey)
+  if (primary !== undefined) {
+    const hit = match(primary)
+    if (hit !== undefined) return hit
+  }
+  for (const routing of idx.routingsByMaterialPlant.get(pairKey) ?? []) {
+    const hit = match(routing)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+/**
+ * What one (material, work center, operation) runs at TODAY, at a given OEE.
+ *
+ * `oee` comes from `resolveOee` at the week being asked about, so the effective
+ * rate quoted here is the one the engine itself would use.
+ */
+export function quoteRate(
+  snap: Snapshot,
+  idx: SnapshotIndexes,
+  reference: string,
+  workCenterId: WorkCenterId,
+  opId: OperationId,
+  oee: number,
+): RateQuote {
+  const materialId = findMaterial(snap, idx, reference)
+  if (materialId === undefined) {
+    return { ...UNRESOLVED, status: 'unknownMaterial', materialId: null, materialCode: null }
+  }
+  const code = idx.materialById.get(materialId)?.code ?? null
+  const op = findRoutingOperation(idx, materialId, workCenterId, opId)
+  if (op === undefined) {
+    return { ...UNRESOLVED, status: 'noOperation', materialId, materialCode: code }
+  }
+  const resolved = resolveOperation(snap, idx, materialId, op, oee)
+  if (!(resolved.ratePerHour > 0)) {
+    return { ...UNRESOLVED, status: 'noRate', materialId, materialCode: code }
+  }
+  const override = idx.rateOverrideByKey.get(key(materialId, workCenterId, opId))
+  return {
+    status: 'resolved',
+    materialId,
+    materialCode: code,
+    ratePerHour: resolved.ratePerHour,
+    effectiveRatePerHour: resolved.effectiveRatePerHour,
+    oee: Number.isFinite(oee) && oee > 0 ? oee : null,
+    fromOverride:
+      override !== undefined &&
+      Number.isFinite(override.ratePerHour) &&
+      override.ratePerHour > 0,
   }
 }

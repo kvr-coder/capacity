@@ -28,7 +28,7 @@
  * material is typed as a code and the form says out loud that it cannot check it.
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   CapacityPool,
   DowntimeEvent,
@@ -37,17 +37,20 @@ import type {
   MaterialSelector,
   Move,
   OeeGlidePath,
-  PoolCapacity,
   Region,
   WorkCenter,
 } from '@/domain/types'
 import { REGIONS } from '@/domain/types'
 import { clamp } from '@/domain/lookup'
+import { buildCeilings, resolveCeiling } from '@/domain/capacity'
+import { DEFAULT_UTILISATION_CEILING } from '@/domain/engine'
 import { describeMove } from '@/domain/moves'
-import { pct, usd } from '@/lib/format'
+import { pct, units, usd } from '@/lib/format'
 import { Badge, Button, Chip, NumberField, Select, TextField, Toggle } from '@/components'
 import type { SelectOption } from '@/components'
-import { catalogIndexes, nextLocalId, useUiStore } from '@/state/store'
+import { catalogIndexes, nextLocalId, useActiveScenario, useUiStore } from '@/state/store'
+import { useResolvedRate } from '@/state/model'
+import { poolOf, shiftPoolNow } from '@/routes/moveEditorDefaults'
 import styles from '@/routes/MoveEditor.module.css'
 
 // ---------------------------------------------------------------------------
@@ -333,31 +336,139 @@ function poolChoiceOf(pools: readonly CapacityPool[]): PoolChoice {
   return labour ? 'labour' : 'machine'
 }
 
-/** Pool capacity of a work center, or a plausible blank when it has none. */
-function poolOf(wc: WorkCenter | undefined, pool: CapacityPool): PoolCapacity {
-  const found = wc?.pools.find((entry) => entry.pool === pool)
-  if (found !== undefined) return found
-  return {
-    pool,
-    count: 1,
-    shiftsPerDay: 2,
-    hoursPerShift: 8,
-    daysPerWeek: 5,
-    utilisationFactor: 0.9,
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Draft <-> Move
 // ---------------------------------------------------------------------------
 
 interface CatalogShape {
-  plants: Array<{ id: string; code: string; city: string; region: Region }>
+  plants: Array<{ id: string; code: string; city: string; region: Region; defaultOee: number }>
   workCenters: WorkCenter[]
   families: Array<{ id: string; code: string; name: string }>
   groups: Array<{ id: string; code: string; name: string }>
   operations: Array<{ id: string; code: string; name: string }>
   weekCount: number
+  /**
+   * The ceilings the ACTIVE scenario resolves to, most specific winning.
+   *
+   * Unlike OEE this needs no worker round trip: `buildCeilings` reads the
+   * scenario's own `utilisationCeiling` moves, and the main thread holds the
+   * scenario. So there is no excuse for the form to show a policy number that
+   * is not the line currently being drawn.
+   */
+  ceilings: ReturnType<typeof buildCeilings>
+  /** Baseline resolved OEE, work center x week. See `CatalogPayload.baselineOee`. */
+  resolvedOee: { rowOf: Map<string, number>; weekCount: number; values: Float64Array } | null
+}
+
+/**
+ * What the scope a glide path covers runs at TODAY, as a percentage — the mean
+ * of the work centers' own `baseOee` for a plant, or the one work center's.
+ *
+ * This is what the "start from a stated OEE" field must default to. It used to
+ * default to a hardcoded 70, which at a plant running near 80 produced a path
+ * captioned "from 70.0% to 98.0%" that LOWERED OEE for the first third of the
+ * horizon while reading like an improvement.
+ *
+ * It is the BASE of the cascade, not the resolved value: the catalog the main
+ * thread holds carries plants and work centers but no `oeeOverrides` and no
+ * `glidePaths`, so the exact resolved OEE for a given week is not knowable
+ * here. Good to a couple of points, which is enough to stop the trap. The
+ * engine's own regression warning is the exact check.
+ */
+function plantDefaultOee(catalog: CatalogShape, plantId: string): number {
+  return catalog.plants.find((plant) => plant.id === plantId)?.defaultOee ?? 0.75
+}
+
+/** The one work center's OEE in `week`, resolved if the worker sent the grid. */
+function oeeOf(catalog: CatalogShape, workCenterId: string, week: number): number | undefined {
+  const grid = catalog.resolvedOee
+  if (grid !== null) {
+    const row = grid.rowOf.get(workCenterId)
+    if (row !== undefined && grid.weekCount > 0) {
+      const w = Math.min(Math.max(Math.round(week), 0), grid.weekCount - 1)
+      const value = grid.values[row * grid.weekCount + w]
+      if (value !== undefined && value > 0) return value
+    }
+  }
+  const wc = catalog.workCenters.find((entry) => entry.id === workCenterId)
+  if (wc === undefined) return undefined
+  return wc.baseOee > 0 ? wc.baseOee : plantDefaultOee(catalog, wc.plantId)
+}
+
+function plantMeanOee(catalog: CatalogShape, plantId: string, week: number): number {
+  const centers = catalog.workCenters.filter((wc) => wc.plantId === plantId)
+  if (centers.length === 0) return plantDefaultOee(catalog, plantId)
+  let sum = 0
+  let n = 0
+  for (const wc of centers) {
+    const value = oeeOf(catalog, wc.id, week)
+    if (value === undefined) continue
+    sum += value
+    n += 1
+  }
+  return n === 0 ? plantDefaultOee(catalog, plantId) : sum / n
+}
+
+/**
+ * What the scope a glide covers RESOLVES to today, in whole percent — the work
+ * center's own value, or the mean across a plant, read at the ramp's first
+ * week because that is the week the start value replaces.
+ *
+ * This is what the "start from a stated OEE" field auto-fetches. It used to be
+ * a hardcoded 70, which at a plant running near 80 produced a path captioned
+ * "from 70.0% to 98.0%" that LOWERED OEE for the first third of the horizon
+ * while reading like an improvement. Overriding it downward is still allowed
+ * and unclamped — an ageing asset or a learning curve is a real forecast — but
+ * it can no longer happen by accident.
+ */
+function scopeOeePct(draft: Draft, catalog: CatalogShape): number {
+  const week = draft.fromWeek
+  const value =
+    draft.glideScope === 'workCenter'
+      ? (oeeOf(catalog, draft.glideWorkCenterId, week) ?? 0.75)
+      : plantMeanOee(catalog, draft.glidePlantId, week)
+  return Math.round(value * 100)
+}
+
+/**
+ * What OEE the scope of an `oeeSet` move resolves to TODAY, in whole percent.
+ *
+ * `oeeSet` states a value; the value it replaces is this one. Defaulting the
+ * field to the first work center in the catalog — which is what it did — meant
+ * that pointing the form at any other machine, or at a plant, showed a number
+ * belonging to a machine the planner had not selected.
+ *
+ * A material-scoped OEE is quoted at its work center: a per-SKU override lives
+ * in the worker and cannot be read here, so this is the value that SKU
+ * inherits unless one already exists. Close, and never from the wrong asset.
+ */
+function scopeSetOeePct(draft: Draft, catalog: CatalogShape): number {
+  const week = draft.oeeWindowed ? draft.fromWeek : 0
+  const value =
+    draft.oeeScope === 'plant'
+      ? plantMeanOee(catalog, draft.oeePlantId, week)
+      : (oeeOf(catalog, draft.oeeWorkCenterId, week) ?? 0.75)
+  return Math.round(value * 100)
+}
+
+/**
+ * The utilisation ceiling the chosen scope resolves to TODAY, in whole percent.
+ *
+ * 95% was a policy target standing in for a current value. The two are not the
+ * same: the engine's own default is 100%, and a scenario that has already
+ * lowered the network to 92% would be handed 95% — a RISE — by a form whose
+ * field reads as "the line that is drawn today".
+ */
+function scopeCeilingPct(draft: Draft, catalog: CatalogShape): number {
+  const ceilings = catalog.ceilings
+  if (draft.ceilingScope === 'workCenter') {
+    const wc = catalog.workCenters.find((entry) => entry.id === draft.ceilingWorkCenterId)
+    if (wc !== undefined) return Math.round(resolveCeiling(ceilings, wc) * 100)
+  }
+  if (draft.ceilingScope === 'plant') {
+    return Math.round((ceilings.byPlant.get(draft.ceilingPlantId) ?? ceilings.global) * 100)
+  }
+  return Math.round(ceilings.global * 100)
 }
 
 function blankDraft(catalog: CatalogShape): Draft {
@@ -384,14 +495,19 @@ function blankDraft(catalog: CatalogShape): Draft {
     oeePlantId: plantId,
     oeeWorkCenterId: firstWc?.id ?? '',
     oeeMaterialId: '',
-    oeePct: Math.round((firstWc?.baseOee ?? 0.75) * 100),
+    // Where the default scope (one work center) actually resolves today, not
+    // that work center's `baseOee` and never another machine's.
+    oeePct: Math.round((oeeOf(catalog, firstWc?.id ?? '', 0) ?? firstWc?.baseOee ?? 0.75) * 100),
     oeeWindowed: false,
 
     glideScope: 'plant',
     glidePlantId: plantId,
     glideWorkCenterId: firstWc?.id ?? '',
     glideUseStart: false,
-    glideStartPct: 70,
+    // Never a hardcoded number: a start below where the scope runs today is a
+    // regression wearing an improvement's label. Recomputed whenever the toggle
+    // is switched on, since the scope can change under it.
+    glideStartPct: Math.round(plantMeanOee(catalog, plantId, 0) * 100),
     glideEndPct: 82,
     glideCurve: 'sCurve',
     glideLabel: 'OEE improvement programme',
@@ -399,7 +515,13 @@ function blankDraft(catalog: CatalogShape): Draft {
     rateMaterialId: '',
     rateWorkCenterId: firstWc?.id ?? '',
     rateOpId: firstId(catalog.operations),
-    ratePerHour: 100,
+    // NOT a number. The rate for a (SKU, work center, operation) lives in the
+    // worker — routings, production versions, overrides and OEE all do — so the
+    // form cannot know it at construction time and must not pretend to. It used
+    // to say 100 eaches/hour against real rates spanning 150–3000. Zero shows
+    // as empty-of-meaning, fails validation, and is replaced the moment
+    // `useResolvedRate` answers for the triple actually selected.
+    ratePerHour: 0,
 
     shiftWorkCenterId: firstWc?.id ?? '',
     shiftPool: 'labour',
@@ -426,7 +548,7 @@ function blankDraft(catalog: CatalogShape): Draft {
     ceilingScope: 'global',
     ceilingPlantId: plantId,
     ceilingWorkCenterId: firstWc?.id ?? '',
-    ceilingPct: 95,
+    ceilingPct: Math.round(catalog.ceilings.global * 100),
 
     retrofitWorkCenterId: firstWc?.id ?? '',
     retrofitId: '',
@@ -499,21 +621,27 @@ function draftFromMove(move: Move, catalog: CatalogShape): Draft {
         fromWeek: move.fromWeek ?? draft.fromWeek,
         toWeek: move.toWeek ?? draft.toWeek,
       }
-    case 'oeeGlide':
-      return {
+    case 'oeeGlide': {
+      const glide: Draft = {
         ...draft,
         kind: 'oeeGlide',
         glideScope: move.path.scope,
         glidePlantId: move.path.plantId ?? draft.glidePlantId,
         glideWorkCenterId: move.path.workCenterId ?? draft.glideWorkCenterId,
         glideUseStart: move.path.startValue !== undefined,
-        glideStartPct: (move.path.startValue ?? 0.7) * 100,
+        // No stated start on the move being edited: park the field on where the
+        // scope runs today, never on a hardcoded number the planner would then
+        // be one click away from committing.
+        glideStartPct: (move.path.startValue ?? 0) * 100,
         glideEndPct: move.path.endValue * 100,
         glideCurve: move.path.curve,
         glideLabel: move.path.label,
         fromWeek: move.path.fromWeek,
         toWeek: move.path.toWeek,
       }
+      if (move.path.startValue === undefined) glide.glideStartPct = scopeOeePct(glide, catalog)
+      return glide
+    }
     case 'rateSet':
       return {
         ...draft,
@@ -523,7 +651,12 @@ function draftFromMove(move: Move, catalog: CatalogShape): Draft {
         rateOpId: move.opId,
         ratePerHour: move.ratePerHour,
       }
-    case 'shiftChange':
+    case 'shiftChange': {
+      // The fields this move does not set still have to READ as the pool it
+      // targets, not as the first work center in the catalog — which is what
+      // `draft` carries. A planner opening an existing shift move must see the
+      // machine they are looking at.
+      const now = shiftPoolNow(catalog.workCenters, move.workCenterId, move.pool)
       return {
         ...draft,
         kind: 'shiftChange',
@@ -532,14 +665,15 @@ function draftFromMove(move: Move, catalog: CatalogShape): Draft {
         fromWeek: move.fromWeek,
         toWeek: move.toWeek,
         shiftSetCount: move.count !== undefined,
-        shiftCount: move.count ?? draft.shiftCount,
+        shiftCount: move.count ?? now.count,
         shiftSetShifts: move.shiftsPerDay !== undefined,
-        shiftsPerDay: move.shiftsPerDay ?? draft.shiftsPerDay,
+        shiftsPerDay: move.shiftsPerDay ?? now.shiftsPerDay,
         shiftSetHours: move.hoursPerShift !== undefined,
-        hoursPerShift: move.hoursPerShift ?? draft.hoursPerShift,
+        hoursPerShift: move.hoursPerShift ?? now.hoursPerShift,
         shiftSetDays: move.daysPerWeek !== undefined,
-        daysPerWeek: move.daysPerWeek ?? draft.daysPerWeek,
+        daysPerWeek: move.daysPerWeek ?? now.daysPerWeek,
       }
+    }
     case 'downtimeUpsert':
       return {
         ...draft,
@@ -672,7 +806,20 @@ interface Built {
  * Percentages divide by 100 exactly here and nowhere else, so there is one place
  * to look when a number on screen and a number in the model disagree.
  */
-function buildMove(draft: Draft, catalog: CatalogShape, existingId: string | null): Built {
+function buildMove(
+  draft: Draft,
+  catalog: CatalogShape,
+  existingId: string | null,
+  /**
+   * The canonical material id for the rate form's typed SKU, once the worker
+   * has resolved it. A planner types a CODE, because a code is what is printed
+   * on a router, but `rateSet` is keyed by material ID — an override stored
+   * under a code matches nothing and silently does nothing. Empty until the
+   * quote answers, in which case the typed text is stored as-is, exactly as
+   * before.
+   */
+  resolvedRateMaterialId: string,
+): Built {
   const errors: Errors = {}
   const lastWeek = Math.max(0, catalog.weekCount - 1)
 
@@ -816,7 +963,8 @@ function buildMove(draft: Draft, catalog: CatalogShape, existingId: string | nul
       return {
         move: {
           kind: 'rateSet',
-          materialId: draft.rateMaterialId.trim(),
+          materialId:
+            resolvedRateMaterialId !== '' ? resolvedRateMaterialId : draft.rateMaterialId.trim(),
           workCenterId: draft.rateWorkCenterId,
           opId: draft.rateOpId,
           ratePerHour: draft.ratePerHour,
@@ -1073,6 +1221,7 @@ export interface MoveEditorProps {
 
 export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
   const catalogPayload = useUiStore((state) => state.catalog)
+  const scenario = useActiveScenario()
 
   const catalog = useMemo<CatalogShape>(
     () => ({
@@ -1081,14 +1230,26 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
         code: plant.code,
         city: plant.city,
         region: plant.region,
+        defaultOee: plant.defaultOee,
       })),
       workCenters: catalogPayload?.workCenters ?? [],
       families: catalogPayload?.families ?? [],
       groups: catalogPayload?.groups ?? [],
       operations: catalogPayload?.standardOperations ?? [],
       weekCount: catalogPayload?.time.weeks.length ?? 0,
+      // Read off the scenario being edited, so the ceiling the form starts from
+      // is the one the moves already in the log have left in place.
+      ceilings: buildCeilings(scenario, DEFAULT_UTILISATION_CEILING),
+      resolvedOee:
+        catalogPayload?.baselineOee === undefined
+          ? null
+          : {
+              rowOf: new Map(catalogPayload.baselineOee.workCenterIds.map((id, i) => [id, i])),
+              weekCount: catalogPayload.baselineOee.weekCount,
+              values: catalogPayload.baselineOee.values,
+            },
     }),
-    [catalogPayload],
+    [catalogPayload, scenario],
   )
 
   const classById = useMemo(
@@ -1111,7 +1272,190 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
     setDraft((prior) => ({ ...prior, ...next }))
   }, [])
 
-  const built = useMemo(() => buildMove(draft, catalog, existingId), [draft, catalog, existingId])
+  /**
+   * Change what an `oeeSet` move points at, and RE-FETCH the value it is
+   * replacing. Same trap as the glide start value, one field along: the number
+   * on screen must belong to the scope now selected.
+   */
+  const patchOeeScope = useCallback(
+    (next: Partial<Draft>) => {
+      setDraft((prior) => {
+        const merged = { ...prior, ...next }
+        return { ...merged, oeePct: scopeSetOeePct(merged, catalog) }
+      })
+    },
+    [catalog],
+  )
+
+  /** Change what a ceiling move points at, and re-read the ceiling drawn there. */
+  const patchCeilingScope = useCallback(
+    (next: Partial<Draft>) => {
+      setDraft((prior) => {
+        const merged = { ...prior, ...next }
+        return { ...merged, ceilingPct: scopeCeilingPct(merged, catalog) }
+      })
+    },
+    [catalog],
+  )
+
+  /**
+   * Change what a glide path points at, and RE-FETCH the start value for the
+   * new scope. Retargeting a plant ramp at a different plant, or switching
+   * plant/work-center scope, changes what "today's OEE" means — leaving the
+   * previous site's number in the field is the same trap as the hardcoded 70,
+   * just harder to spot. A start the planner typed themselves is left alone
+   * only when the toggle is off, because then the field is not in play.
+   */
+  const patchGlideScope = useCallback(
+    (next: Partial<Draft>) => {
+      setDraft((prior) => {
+        const merged = { ...prior, ...next }
+        if (!merged.glideUseStart) return merged
+        return { ...merged, glideStartPct: scopeOeePct(merged, catalog) }
+      })
+    },
+    [catalog],
+  )
+
+  /**
+   * Change which pool the shift form points at, and RE-READ all four numbers
+   * from it.
+   *
+   * The four fields are current values, not new ones, so the only honest thing
+   * to show after a selection change is what the newly selected pool runs at
+   * now. Overwriting whatever was in them is deliberate: a number typed for the
+   * previous work center describes the previous work center, and leaving it
+   * behind is precisely how another machine's shift pattern gets applied to
+   * this one. The four "change this" toggles are left alone — which of the four
+   * knobs a planner intends to turn does not change when they change machine.
+   */
+  const patchShiftScope = useCallback(
+    (next: Partial<Draft>) => {
+      setDraft((prior) => {
+        const merged = { ...prior, ...next }
+        const now = shiftPoolNow(catalog.workCenters, merged.shiftWorkCenterId, merged.shiftPool)
+        return {
+          ...merged,
+          shiftCount: now.count,
+          shiftsPerDay: now.shiftsPerDay,
+          hoursPerShift: now.hoursPerShift,
+          daysPerWeek: now.daysPerWeek,
+        }
+      })
+    },
+    [catalog],
+  )
+
+  /** What the selected pool runs at today — the caption under the four fields. */
+  const shiftNow = useMemo(
+    () => shiftPoolNow(catalog.workCenters, draft.shiftWorkCenterId, draft.shiftPool),
+    [catalog, draft.shiftWorkCenterId, draft.shiftPool],
+  )
+
+  // --- the current run rate, fetched from the worker ------------------------
+
+  /**
+   * The rate for a (SKU, work center, operation) cannot be resolved on this
+   * thread — the routings, the production versions, the overrides and the OEE
+   * cascade are all in the worker. So it is asked for, and re-asked whenever
+   * any of the three selections changes.
+   */
+  const rateKey = `${draft.rateMaterialId.trim()}|${draft.rateWorkCenterId}|${draft.rateOpId}`
+  const rateQuery = useResolvedRate(
+    draft.kind === 'rateSet' ? draft.rateMaterialId : '',
+    draft.rateWorkCenterId,
+    draft.rateOpId,
+    draft.fromWeek,
+  )
+  /**
+   * The selection at which the planner last typed a rate themselves. Their
+   * number survives everything except pointing the form at a different triple,
+   * at which point it describes something they are no longer editing. An
+   * existing move opens as "already typed": the saved rate is the planner's.
+   */
+  const [rateEditedKey, setRateEditedKey] = useState<string | null>(() =>
+    initial?.kind === 'rateSet' ? rateKey : null,
+  )
+  const rateEdited = rateEditedKey === rateKey
+  const rateQuote = rateQuery.data
+
+  /**
+   * The canonical id behind the code the planner typed, and only when the
+   * answer demonstrably belongs to what is in the field right now — matching
+   * the text against the quote is what makes a stale in-flight answer
+   * unusable rather than merely unlikely.
+   */
+  const typedMaterial = draft.rateMaterialId.trim()
+  const resolvedRateMaterialId =
+    rateQuote !== null &&
+    rateQuote.status === 'resolved' &&
+    rateQuote.materialId !== null &&
+    (rateQuote.materialId === typedMaterial || rateQuote.materialCode === typedMaterial)
+      ? rateQuote.materialId
+      : ''
+
+  useEffect(() => {
+    if (rateEdited) return
+    // Unresolved is shown as unresolved. Holding the previous triple's rate, or
+    // falling back to a constant, is the whole bug.
+    const fetched =
+      rateQuote !== null && rateQuote.status === 'resolved' && rateQuote.ratePerHour !== null
+        ? rateQuote.ratePerHour
+        : 0
+    setDraft((prior) => (prior.ratePerHour === fetched ? prior : { ...prior, ratePerHour: fetched }))
+  }, [rateQuote, rateEdited])
+
+  /**
+   * What the field says about where its number came from.
+   *
+   * Naming the resolved value, and naming it as NOMINAL, is half the fix: a
+   * planner who can see 850 units/hour cannot be handed 100 without noticing.
+   * When nothing resolves, this says so rather than letting a stale or invented
+   * number stand in.
+   */
+  const rateHint = ((): string => {
+    if (draft.rateMaterialId.trim() === '') {
+      return 'Nominal eaches per hour, before OEE. Name the SKU and the rate it currently runs at here is fetched from master data.'
+    }
+    if (rateQuery.error !== null) {
+      return `The current rate could not be fetched (${rateQuery.error}). Type the rate you intend; nothing has been guessed for you.`
+    }
+    if (rateQuote === null) return 'Fetching the rate this SKU currently runs at here…'
+    switch (rateQuote.status) {
+      case 'unknownMaterial':
+        return 'No SKU with that code or id is in this dataset, so there is no current rate to start from. Check the code — an override on a SKU that does not exist changes nothing.'
+      case 'noOperation':
+        return 'This SKU has no routing operation at that work center for that operation, so it does not run there today and there is no current rate to change.'
+      case 'noRate':
+        return 'The routing carries no usable rate for this SKU here, so there is nothing to start from. Whatever you type is the whole of the rate.'
+      case 'resolved': {
+        const nominal = rateQuote.ratePerHour ?? 0
+        const effective = rateQuote.effectiveRatePerHour ?? 0
+        const oee = rateQuote.oee
+        const source = rateQuote.fromOverride
+          ? ' That current value is itself an existing rate override.'
+          : ''
+        const staleWarning = rateEdited
+          ? ` It currently runs at ${units(nominal)} units/hour nominal.`
+          : ` Auto-fetched: ${units(nominal)} units/hour.`
+        return (
+          `Nominal — before OEE.${staleWarning} After OEE${oee === null ? '' : ` of ${pct(oee, 0)}`}` +
+          ` it produces ${units(effective)} units/hour, which is the number the shop floor observes.` +
+          ` Set the nominal one here.${source}`
+        )
+      }
+    }
+  })()
+
+  /** The machine the shift block is pointed at, for the caption above it. */
+  const shiftLabel =
+    catalog.workCenters.find((wc) => wc.id === draft.shiftWorkCenterId)?.code ??
+    'This work center'
+
+  const built = useMemo(
+    () => buildMove(draft, catalog, existingId, resolvedRateMaterialId),
+    [draft, catalog, existingId, resolvedRateMaterialId],
+  )
 
   const indexes = useMemo(() => catalogIndexes(catalogPayload), [catalogPayload])
   const autoLabel = useMemo(
@@ -1339,9 +1683,7 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
                 { value: 'workCenter', label: 'One work center' },
                 { value: 'materialWorkCenter', label: 'One SKU on one work center' },
               ]}
-              onChange={(value) =>
-                patch({ oeeScope: value as Draft['oeeScope'] })
-              }
+              onChange={(value) => patchOeeScope({ oeeScope: value as Draft['oeeScope'] })}
               hint="OEE resolves plant → work center → SKU × work center, most specific winning."
             />
             {draft.oeeScope === 'plant' ? (
@@ -1349,14 +1691,14 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
                 label="Plant"
                 value={draft.oeePlantId}
                 options={plantOptions}
-                onChange={(value) => patch({ oeePlantId: value })}
+                onChange={(value) => patchOeeScope({ oeePlantId: value })}
               />
             ) : (
               <Select
                 label="Work center"
                 value={draft.oeeWorkCenterId}
                 options={workCenterOptions}
-                onChange={(value) => patch({ oeeWorkCenterId: value })}
+                onChange={(value) => patchOeeScope({ oeeWorkCenterId: value })}
               />
             )}
           </div>
@@ -1379,7 +1721,7 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
               step={1}
               onChange={(value) => patch({ oeePct: value })}
               error={errors['oeePct']}
-              hint={`Between ${pct(OEE_MIN, 0)} and ${pct(OEE_MAX, 0)}. Rate is a separate knob — this does not touch it.`}
+              hint={`Auto-fetched from what this scope resolves to today (${scopeSetOeePct(draft, catalog)}%), and re-read whenever you change the scope. Between ${pct(OEE_MIN, 0)} and ${pct(OEE_MAX, 0)}. Rate is a separate knob — this does not touch it.`}
             />
           </div>
           <Toggle
@@ -1403,21 +1745,21 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
                 { value: 'plant', label: 'Every work center at a plant' },
                 { value: 'workCenter', label: 'One work center' },
               ]}
-              onChange={(value) => patch({ glideScope: value as Draft['glideScope'] })}
+              onChange={(value) => patchGlideScope({ glideScope: value as Draft['glideScope'] })}
             />
             {draft.glideScope === 'plant' ? (
               <Select
                 label="Plant"
                 value={draft.glidePlantId}
                 options={plantOptions}
-                onChange={(value) => patch({ glidePlantId: value })}
+                onChange={(value) => patchGlideScope({ glidePlantId: value })}
               />
             ) : (
               <Select
                 label="Work center"
                 value={draft.glideWorkCenterId}
                 options={workCenterOptions}
-                onChange={(value) => patch({ glideWorkCenterId: value })}
+                onChange={(value) => patchGlideScope({ glideWorkCenterId: value })}
               />
             )}
           </div>
@@ -1425,7 +1767,17 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
           <Toggle
             label="Start from a stated OEE"
             checked={draft.glideUseStart}
-            onChange={(checked) => patch({ glideUseStart: checked })}
+            onChange={(checked) =>
+              patch(
+                // Switching it ON parks the field on where this scope runs
+                // TODAY. Anything else — a hardcoded 70, say — hands the planner
+                // a ramp that lowers the early weeks while its label reads as an
+                // improvement.
+                checked
+                  ? { glideUseStart: true, glideStartPct: scopeOeePct(draft, catalog) }
+                  : { glideUseStart: false },
+              )
+            }
             hint="Off starts the ramp from whatever OEE resolves in the first week."
           />
           <div className={styles.row}>
@@ -1439,6 +1791,15 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
                 step={1}
                 onChange={(value) => patch({ glideStartPct: value })}
                 error={errors['glideStartPct']}
+                hint={
+                  // Non-blocking on purpose. Forecasting a DECLINE — an ageing
+                  // asset, a learning curve, known tooling degradation — is a
+                  // real planning case and must stay available. What must not
+                  // happen is a planner modelling one by accident.
+                  draft.glideStartPct < scopeOeePct(draft, catalog) - 0.5
+                    ? `Auto-fetched ${scopeOeePct(draft, catalog)}% — this scope’s currently resolved OEE. You have set ${draft.glideStartPct}%, a STEP DOWN from it: the ramp will lower OEE before it raises it. That is allowed; it is called out so it is never a surprise.`
+                    : `Auto-fetched from this scope’s currently resolved OEE (${scopeOeePct(draft, catalog)}%). Change it freely — including downward, to model a decline.`
+                }
               />
             ) : null}
             <NumberField
@@ -1498,16 +1859,25 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
           </div>
           <div className={styles.row}>
             <NumberField
-              label="Run rate"
+              label="Run rate — NOMINAL, before OEE"
               suffix="units / hour"
               value={draft.ratePerHour}
               min={0}
               step={5}
-              onChange={(value) => patch({ ratePerHour: value })}
+              onChange={(value) => {
+                setRateEditedKey(rateKey)
+                patch({ ratePerHour: value })
+              }}
               error={errors['ratePerHour']}
-              hint="Eaches per hour before OEE. Effective rate is this times OEE."
+              hint={rateHint}
             />
           </div>
+          <p className={styles.note}>
+            This move sets the NOMINAL rate. What the machine is observed to
+            produce is the EFFECTIVE rate — nominal × OEE — so the two differ by
+            a fifth or so and typing an observed number here raises the rate
+            twice over. OEE is a separate knob and this move does not touch it.
+          </p>
         </>
       ) : null}
 
@@ -1519,7 +1889,8 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
               label="Work center"
               value={draft.shiftWorkCenterId}
               options={workCenterOptions}
-              onChange={(value) => patch({ shiftWorkCenterId: value })}
+              onChange={(value) => patchShiftScope({ shiftWorkCenterId: value })}
+              hint="Changing this re-reads all four numbers below from the machine you pick."
             />
             <Select
               label="Which pool"
@@ -1528,13 +1899,21 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
                 { value: 'machine', label: 'Machine — the capex question' },
                 { value: 'labour', label: 'Labour — the hiring question' },
               ]}
-              onChange={(value) => patch({ shiftPool: value as CapacityPool })}
+              onChange={(value) => patchShiftScope({ shiftPool: value as CapacityPool })}
             />
           </div>
           {weekWindow}
           {errors['shiftChange'] === undefined ? null : (
             <p className={styles.rowError}>{errors['shiftChange']}</p>
           )}
+          <p className={styles.note}>
+            {shiftLabel} runs {shiftNow.count}{' '}
+            {draft.shiftPool === 'machine' ? 'machines' : 'operators'} ×{' '}
+            {shiftNow.shiftsPerDay} shifts × {shiftNow.hoursPerShift} h ×{' '}
+            {shiftNow.daysPerWeek} days today. The four fields below start from
+            exactly that and are re-read whenever you change the machine or the
+            pool.
+          </p>
           <div className={styles.grid2}>
             <div className={styles.switchField}>
               <Toggle
@@ -1723,14 +2102,16 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
                 { value: 'plant', label: 'One plant' },
                 { value: 'workCenter', label: 'One work center' },
               ]}
-              onChange={(value) => patch({ ceilingScope: value as Draft['ceilingScope'] })}
+              onChange={(value) =>
+                patchCeilingScope({ ceilingScope: value as Draft['ceilingScope'] })
+              }
             />
             {draft.ceilingScope === 'plant' ? (
               <Select
                 label="Plant"
                 value={draft.ceilingPlantId}
                 options={plantOptions}
-                onChange={(value) => patch({ ceilingPlantId: value })}
+                onChange={(value) => patchCeilingScope({ ceilingPlantId: value })}
               />
             ) : null}
             {draft.ceilingScope === 'workCenter' ? (
@@ -1738,7 +2119,7 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
                 label="Work center"
                 value={draft.ceilingWorkCenterId}
                 options={workCenterOptions}
-                onChange={(value) => patch({ ceilingWorkCenterId: value })}
+                onChange={(value) => patchCeilingScope({ ceilingWorkCenterId: value })}
               />
             ) : null}
             <NumberField
@@ -1750,7 +2131,7 @@ export function MoveEditor({ initial, onSubmit, onCancel }: MoveEditorProps) {
               step={1}
               onChange={(value) => patch({ ceilingPct: value })}
               error={errors['ceilingPct']}
-              hint={`Between ${pct(CEILING_MIN, 0)} and ${pct(CEILING_MAX, 0)}. Load above it reads as overload even when the hours exist.`}
+              hint={`This scope is at ${scopeCeilingPct(draft, catalog)}% today, which is where the field starts. Between ${pct(CEILING_MIN, 0)} and ${pct(CEILING_MAX, 0)}. Load above the ceiling reads as overload even when the hours exist.`}
             />
           </div>
         </>

@@ -28,7 +28,7 @@
  */
 
 import type { EngineOptions, Filters, ModelResult, Scenario } from '@/domain/types'
-import type { CatalogPayload, WorkerRequest, WorkerResponse } from '@/worker/protocol'
+import type { CatalogPayload, RateQuote, WorkerRequest, WorkerResponse } from '@/worker/protocol'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,6 +47,7 @@ interface ResponseByRequest {
   workCenterDetail: Extract<WorkerResponse, { type: 'workCenterDetail' }>
   relief: Extract<WorkerResponse, { type: 'relief' }>
   materialSlice: Extract<WorkerResponse, { type: 'materialSlice' }>
+  resolveRate: Extract<WorkerResponse, { type: 'resolvedRate' }>
   exportCsv: Extract<WorkerResponse, { type: 'csv' }>
 }
 
@@ -327,6 +328,18 @@ export class EngineClient {
   ): Promise<Extract<WorkerResponse, { type: 'materialSlice' }>> {
     const envelope = await this.requestLatest({ type: 'materialSlice', ...args })
     return envelope.response
+  }
+
+  /**
+   * What one (material, work center, operation) runs at TODAY, nominal and
+   * effective. The move editor starts a `rateSet` from this rather than from a
+   * constant that belongs to no machine.
+   */
+  async resolveRate(
+    args: Omit<Extract<WorkerRequest, { type: 'resolveRate' }>, 'id' | 'type'>,
+  ): Promise<RateQuote> {
+    const envelope = await this.requestLatest({ type: 'resolveRate', ...args })
+    return envelope.response.quote
   }
 
   async exportCsv(

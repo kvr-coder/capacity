@@ -21,6 +21,13 @@
  * two overrides of the same scope cover the same week, the later entry in
  * `snapshot.oeeOverrides` wins — scenario moves append, so "last edit wins" is
  * what a planner expects.
+ *
+ * PROVENANCE OUTRANKS ALL OF IT. Both `OeeOverride` and `OeeGlidePath` carry a
+ * `source`, and an entry a scenario move introduced beats one from master data
+ * over every week both cover — whatever its scope, window or `fromWeek`. The
+ * cascade above orders background data against background data; it must never
+ * be the reason a planner's own logged decision disappears. Within one
+ * provenance tier the ordering above is unchanged.
  */
 
 import type {
@@ -95,26 +102,62 @@ export function evaluateGlide(path: OeeGlidePath, week: WeekIndex, startValue: n
   return start + (path.endValue - start) * f
 }
 
+/** 1 for a path or override a scenario move introduced, 0 for master data. */
+function tierOf(item: { source?: 'master' | 'scenario' }): number {
+  return item.source === 'scenario' ? 1 : 0
+}
+
 interface RankedPath {
   path: OeeGlidePath
+  /** 1 = introduced by a scenario move, 0 = master data. Outranks everything. */
+  tier: number
   /** plant-scope 0, workCenter-scope 1 — the tie-break at equal fromWeek. */
   specificity: number
   order: number
 }
 
 /**
- * Sorted ascending by fromWeek. For a given week the winner is the LAST entry
- * whose `fromWeek` is at or before it: "two glide paths on the same work
- * center, the later fromWeek wins in its window". Equal fromWeek is broken by
- * scope (a work-center path beats a plant-wide one) and then by declaration
- * order.
+ * Sorted ascending in precedence, so for a given week the winner is the LAST
+ * entry whose `fromWeek` is at or before it.
+ *
+ * PROVENANCE FIRST: a path a scenario move introduced beats one that came from
+ * master data over any week both cover, whatever their `fromWeek`. A planner's
+ * logged decision is not background data and must not lose to it.
+ *
+ * Within one provenance tier the older rule stands: greatest `fromWeek` wins in
+ * its window, equal `fromWeek` broken by scope (a work-center path beats a
+ * plant-wide one) and then by declaration order.
  */
 function rankPaths(entries: RankedPath[]): RankedPath[] {
   return entries.sort(
     (a, b) =>
+      a.tier - b.tier ||
       a.path.fromWeek - b.path.fromWeek ||
       a.specificity - b.specificity ||
       a.order - b.order,
+  )
+}
+
+interface RankedOverride {
+  override: OeeOverride
+  /** 1 = introduced by a scenario move, 0 = master data. Outranks everything. */
+  tier: number
+  /** plant-scope 0, workCenter-scope 1. */
+  specificity: number
+  order: number
+}
+
+/**
+ * The same rule, for the plant- and work-center-scope overrides `oeeSet`
+ * writes. Before provenance was carried, a scenario `oeeSet` at plant scope
+ * lost to any SEEDED work-center override covering the same week, because
+ * specificity was applied first — the identical silent defeat the glide paths
+ * suffered. With all entries at one tier this reproduces the old order exactly
+ * (plant list first, then work-center list, later entry winning).
+ */
+function rankOverrides(entries: RankedOverride[]): RankedOverride[] {
+  return entries.sort(
+    (a, b) => a.tier - b.tier || a.specificity - b.specificity || a.order - b.order,
   )
 }
 
@@ -134,13 +177,25 @@ export function buildOeeGrid(snap: Snapshot, idx: SnapshotIndexes): Float64Array
   const weekCount = idx.weekCount
   const grid = new Float64Array(idx.workCenterOrder.length * weekCount)
 
-  const plantOverrides = new Map<PlantId, OeeOverride[]>()
-  const wcOverrides = new Map<WorkCenterId, OeeOverride[]>()
-  for (const override of snap.oeeOverrides) {
+  const plantOverrides = new Map<PlantId, RankedOverride[]>()
+  const wcOverrides = new Map<WorkCenterId, RankedOverride[]>()
+  for (let i = 0; i < snap.oeeOverrides.length; i += 1) {
+    const override = snap.oeeOverrides[i]
+    if (override === undefined) continue
     if (override.scope === 'plant' && override.plantId !== undefined) {
-      pushInto(plantOverrides, override.plantId, override)
+      pushInto(plantOverrides, override.plantId, {
+        override,
+        tier: tierOf(override),
+        specificity: 0,
+        order: i,
+      })
     } else if (override.scope === 'workCenter' && override.workCenterId !== undefined) {
-      pushInto(wcOverrides, override.workCenterId, override)
+      pushInto(wcOverrides, override.workCenterId, {
+        override,
+        tier: tierOf(override),
+        specificity: 1,
+        order: i,
+      })
     }
   }
 
@@ -150,11 +205,12 @@ export function buildOeeGrid(snap: Snapshot, idx: SnapshotIndexes): Float64Array
   for (let i = 0; i < snap.glidePaths.length; i += 1) {
     const path = snap.glidePaths[i]
     if (path === undefined) continue
+    const tier = tierOf(path)
     if (path.scope === 'workCenter' && path.workCenterId !== undefined) {
-      pushInto(pathsByWc, path.workCenterId, { path, specificity: 1, order: i })
+      pushInto(pathsByWc, path.workCenterId, { path, tier, specificity: 1, order: i })
     } else if (path.scope === 'plant' && path.plantId !== undefined) {
       for (const wc of idx.workCentersByPlant.get(path.plantId) ?? []) {
-        pushInto(pathsByWc, wc.id, { path, specificity: 0, order: i })
+        pushInto(pathsByWc, wc.id, { path, tier, specificity: 0, order: i })
       }
     }
   }
@@ -175,12 +231,20 @@ export function buildOeeGrid(snap: Snapshot, idx: SnapshotIndexes): Float64Array
     const plantDefault = usable(plant?.defaultOee) && plant ? plant.defaultOee : FALLBACK_OEE
     const base = usable(wc.baseOee) ? wc.baseOee : plantDefault
 
-    const plantList = plantOverrides.get(wc.plantId) ?? []
-    const wcList = wcOverrides.get(wcId) ?? []
+    // One list, ranked provenance-first: the LAST applicable entry wins.
+    const overrides = rankOverrides([
+      ...(plantOverrides.get(wc.plantId) ?? []),
+      ...(wcOverrides.get(wcId) ?? []),
+    ])
     for (let w = 0; w < weekCount; w += 1) {
       let value = base
-      for (const override of plantList) if (inWindow(override, w)) value = override.value
-      for (const override of wcList) if (inWindow(override, w)) value = override.value
+      for (let i = overrides.length - 1; i >= 0; i -= 1) {
+        const entry = overrides[i]
+        if (entry !== undefined && inWindow(entry.override, w)) {
+          value = entry.override.value
+          break
+        }
+      }
       preGlide[w] = value
     }
 
@@ -192,13 +256,19 @@ export function buildOeeGrid(snap: Snapshot, idx: SnapshotIndexes): Float64Array
       continue
     }
 
-    let active = -1
     for (let w = 0; w < weekCount; w += 1) {
-      while (active + 1 < paths.length && (paths[active + 1]?.path.fromWeek ?? Infinity) <= w) {
-        active += 1
+      // `paths` is sorted ascending in precedence, so the winner is the last
+      // applicable entry. A single forward walk no longer works: provenance
+      // ranks above fromWeek, so fromWeek is not monotonic across the list.
+      let entry: RankedPath | undefined
+      for (let i = paths.length - 1; i >= 0; i -= 1) {
+        const candidate = paths[i]
+        if (candidate !== undefined && candidate.path.fromWeek <= w) {
+          entry = candidate
+          break
+        }
       }
       const resolved = preGlide[w] ?? base
-      const entry = active >= 0 ? paths[active] : undefined
       if (entry === undefined) {
         grid[offset + w] = clamp(resolved, OEE_MIN, OEE_MAX)
         continue

@@ -85,8 +85,8 @@ import { buildFilterContext, rollup, summariseAll } from '@/domain/rollup'
 import { findRelief, rankBottlenecks } from '@/domain/relief'
 import { sharedCapacityLinks } from '@/domain/capability'
 import { slippedWindow } from '@/domain/capacity'
-import { resolveOperation } from '@/domain/rates'
-import { resolveOee } from '@/domain/oee'
+import { findMaterial, quoteRate, resolveOperation } from '@/domain/rates'
+import { buildOeeGrid, resolveOee } from '@/domain/oee'
 import { SOURCING_PLANES } from '@/domain/sourcing'
 import { at, clamp, key, round, safeDiv } from '@/domain/lookup'
 
@@ -994,6 +994,44 @@ export function createEngineSession(): EngineSession {
     })
   }
 
+  /**
+   * What one (material, work center, operation) runs at today.
+   *
+   * Answered off the SCENARIO being edited, so the number the form starts from
+   * is the number on screen — including a rate override an earlier move in the
+   * same log already placed. Unresolvable triples come back with a status and
+   * no rate: a form that invents 100 eaches/hour is the bug this exists to
+   * remove, and inventing one here instead would only move it.
+   */
+  function handleResolveRate(
+    request: Extract<WorkerRequest, { type: 'resolveRate' }>,
+    emit: Emit,
+  ): void {
+    const entry = ensureRun(request.scenario, request.filters, undefined)
+    const ctx = entry.ctx
+    const idx = ctx.indexes
+    const weeks = idx.weekCount
+    const week = weeks === 0 ? 0 : clamp(Math.round(request.week), 0, weeks - 1)
+
+    const materialId = findMaterial(ctx.snapshot, idx, request.material)
+    // `resolveOee` throws for a work center outside the grid, and an unknown
+    // work center is a question to answer, not a failure to report.
+    const known =
+      materialId !== undefined && idx.workCenterRow.get(request.workCenterId) !== undefined
+    const oee = known
+      ? resolveOee(ctx.snapshot, idx, ctx.oeeGrid, request.workCenterId, materialId, week)
+      : 0
+    const quote = quoteRate(
+      ctx.snapshot,
+      idx,
+      request.material,
+      request.workCenterId,
+      request.opId,
+      oee,
+    )
+    emit({ id: request.id, type: 'resolvedRate', quote })
+  }
+
   function handleExportCsv(
     request: Extract<WorkerRequest, { type: 'exportCsv' }>,
     emit: Emit,
@@ -1029,6 +1067,9 @@ export function createEngineSession(): EngineSession {
           return
         case 'materialSlice':
           handleMaterialSlice(request, emit)
+          return
+        case 'resolveRate':
+          handleResolveRate(request, emit)
           return
         case 'exportCsv':
           handleExportCsv(request, emit)
@@ -1183,6 +1224,13 @@ function buildCatalog(snap: Snapshot, idx: SnapshotIndexes): CatalogPayload {
     families: snap.families,
     groups: snap.groups,
     materialCountByGroup,
+    // The cascade lives here; the move editor needs its answer to default a
+    // glide's start value to where the chosen scope actually runs today.
+    baselineOee: {
+      workCenterIds: [...idx.workCenterOrder],
+      weekCount: idx.weekCount,
+      values: buildOeeGrid(snap, idx),
+    },
   }
 }
 

@@ -1552,6 +1552,8 @@ export function Scenarios() {
   const compareKpis = lab.compare?.kpis
   const orderedMoves = activeScenario.moves.slice().sort((a, b) => a.seq - b.seq)
   const enabledCount = orderedMoves.filter((entry) => entry.enabled).length
+  /** Deduplicated: the same note can arrive from the KPI run and the full run. */
+  const engineWarnings = [...new Set(lab.active?.warnings ?? [])]
 
   return (
     <div className={styles.page}>
@@ -1885,6 +1887,28 @@ export function Scenarios() {
             </p>
           )}
         </Card>
+
+        {/* ---------------------------------------------------------------- */}
+        {/* What the engine had to say about those decisions.                 */}
+        {/*                                                                   */}
+        {/* `ModelResult.warnings` had no home in the UI at all, so a move     */}
+        {/* quietly switched off — or a glide path that LOWERS OEE while its   */}
+        {/* label reads like an improvement — reached the planner only as a    */}
+        {/* KPI that moved the wrong way. It belongs beside the log it is      */}
+        {/* about.                                                            */}
+        {/* ---------------------------------------------------------------- */}
+        {engineWarnings.length === 0 ? null : (
+          <Card
+            title="What the engine flagged"
+            subtitle={`${engineWarnings.length} note${engineWarnings.length === 1 ? '' : 's'} about the decisions above. None of them stops the run — they are what a planner would want to have been told.`}
+          >
+            <ul className={styles.warnList} aria-label="Engine warnings">
+              {engineWarnings.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          </Card>
+        )}
       </div>
 
       {/* ------------------------------------------------------------------ */}
