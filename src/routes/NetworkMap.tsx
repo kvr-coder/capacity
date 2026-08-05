@@ -22,7 +22,8 @@
  * Nothing sized SKU x week reaches this file.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import type { CapacityPool, Move, ReliefCandidate, WeekIndex } from '@/domain/types'
 import type { WorkCenterDetail } from '@/worker/protocol'
 import type { TableViewProps } from '@/charts/types'
@@ -95,16 +96,35 @@ const SHORTCUTS: Array<{ keys: string[]; what: string }> = [
 ]
 
 /** The stage fills what the bands above and below it do not use. */
-function useStageHeight(): number {
+/**
+ * Sizes the canvas stage to the space actually left below it.
+ *
+ * A fixed offset cannot work here: the chrome above the stage is the app
+ * header, the filter row, the page title and the breadcrumb, and each of those
+ * reflows at a different width. Subtracting a constant left the bottom of the
+ * stage below the fold at 1050px, clipping the last row of work centers.
+ * Measuring the stage's own top against the viewport is the only version that
+ * stays correct when the filter row wraps.
+ */
+function useStageHeight(ref: RefObject<HTMLDivElement>): number {
   const [height, setHeight] = useState(560)
   useEffect(() => {
     const measure = (): void => {
-      setHeight(clamp(Math.round(window.innerHeight - 330), 380, 900))
+      const top = ref.current?.getBoundingClientRect().top ?? 370
+      // The trailing gap keeps the stage clear of the viewport edge, so the
+      // canvas reads as ending rather than as cropped.
+      setHeight(clamp(Math.round(window.innerHeight - top - 24), 380, 900))
     }
     measure()
     window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [])
+    // The filter row can change height without the window resizing at all.
+    const observer = new ResizeObserver(measure)
+    observer.observe(document.body)
+    return () => {
+      window.removeEventListener('resize', measure)
+      observer.disconnect()
+    }
+  }, [ref])
   return height
 }
 
@@ -125,7 +145,8 @@ export function NetworkMap() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [movePanelOpen, setMovePanelOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
-  const stageHeight = useStageHeight()
+  const stageRef = useRef<HTMLDivElement>(null)
+  const stageHeight = useStageHeight(stageRef)
 
   const plant = useMemo(
     () => (catalog?.plants ?? []).find((entry) => entry.id === selection.plantId),
@@ -245,7 +266,7 @@ export function NetworkMap() {
         </nav>
       </div>
 
-      <div className={styles.stage}>
+      <div className={styles.stage} ref={stageRef}>
         <NetworkCanvas height={stageHeight} />
       </div>
 

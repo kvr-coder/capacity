@@ -146,12 +146,36 @@ beats pretending `CRHD` carries them.
 Profiles: `demo` (1,500 SKUs / 40 work centers), `standard` (15,000 / 150), `large`
 (30,000 / 240).
 
-## Getting started
+## Launching it
 
 ```bash
+git clone https://github.com/kvr-coder/capacity.git
+cd capacity
 npm install
-npm run dev            # http://localhost:5173
+npm start              # opens http://localhost:5173 in your browser
 ```
+
+`npm start` is the whole thing — no backend, no database, no API keys. First paint takes a
+few seconds while the worker generates 15,000 SKUs; the loading screen reports what it is
+doing.
+
+If you only want to look at a production build:
+
+```bash
+npm run build && npm run preview      # http://localhost:4173
+```
+
+### A hosted link
+
+`.github/workflows/pages.yml` publishes the built app to GitHub Pages on every push to
+`main`, and can be run by hand from the **Actions** tab to publish any branch. Enable it once
+under **Settings → Pages → Source → GitHub Actions**, and the app lands at
+`https://kvr-coder.github.io/capacity/`.
+
+One caveat worth knowing before you try: **GitHub Pages on a private repository requires a
+paid plan** (Pro, Team or Enterprise). On the free plan the workflow will fail at the deploy
+step. The alternatives are to make the repo public, or to drop `dist/` on any static host —
+it is plain files, and the `VITE_BASE` env var sets the subpath.
 
 ```bash
 npm run typecheck
