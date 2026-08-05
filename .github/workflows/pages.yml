@@ -2,9 +2,14 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
-  # Lets you publish any branch by hand from the Actions tab, which is how you
-  # get a live link for a feature branch before it merges.
+    # The repository's default branch is currently the feature branch, not
+    # `main`, because GitHub adopts whichever branch is pushed first. Listing
+    # both means the site republishes on every push either way, instead of
+    # silently never firing.
+    branches:
+      - main
+      - claude/capacity-modeling-cockpit-br2idj
+  # Lets you publish any other branch by hand from the Actions tab.
   workflow_dispatch:
 
 permissions:
