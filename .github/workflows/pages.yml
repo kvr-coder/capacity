@@ -1,0 +1,64 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    # The repository's default branch is currently the feature branch, not
+    # `main`, because GitHub adopts whichever branch is pushed first. Listing
+    # both means the site republishes on every push either way, instead of
+    # silently never firing.
+    branches:
+      - main
+      - claude/capacity-modeling-cockpit-br2idj
+  # Lets you publish any other branch by hand from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue instead of cancelling, so a merge that
+# lands during a deploy still ends up published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        # Pages serves a project site from /<repo>/, so the bundle has to be
+        # built against that base or every asset 404s.
+        run: VITE_BASE=/${{ github.event.repository.name }}/ npm run build
+
+      - uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on for the repository if it is not already, using the
+          # `pages: write` permission above. Without this the first run fails
+          # with "Get Pages site failed" and someone has to go and flip a
+          # setting by hand before the workflow can ever succeed.
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

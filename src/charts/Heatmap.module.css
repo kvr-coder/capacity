@@ -1,0 +1,55 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.frame {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Wide grids scroll here, never on the page. */
+.scroller {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.svg {
+  display: block;
+}
+
+.svg:focus {
+  outline: none;
+}
+
+.svg:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+.header {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  fill: var(--text-muted);
+}
+
+.rowLabel {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  fill: var(--text-secondary);
+}
+
+.missing {
+  fill: var(--surface-sunken);
+}
+
+.focusRing {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  pointer-events: none;
+}

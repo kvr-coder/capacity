@@ -1,0 +1,15 @@
+/*
+ * The only class `primitives.tsx` needs: axis tick text.
+ *
+ * Ticks are a column of numbers a planner scans vertically, so they take
+ * tabular figures — a column that jitters as digits change is harder to read
+ * than one that does not. Large standalone figures do the opposite; that rule
+ * lives in the tiles, not here.
+ */
+
+.tick {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  fill: var(--text-muted);
+}

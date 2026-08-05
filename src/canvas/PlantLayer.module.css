@@ -1,0 +1,320 @@
+/*
+ * Plant layer.
+ *
+ * Hairline chrome, one step of tone between the column band and the page, and
+ * nothing coloured except the utilisation ring and the plant identity chips.
+ * Every value here is a token.
+ *
+ * Font sizes are in WORLD units, not screen pixels: this layer is drawn inside
+ * the shared transform, so a size here is divided by the fit scale before it
+ * reaches an eye. The grid is fitted to itself and lands near k = 0.9 on a
+ * typical plant, which is where these numbers were chosen — a 16-unit code
+ * renders at ~14px, and the smallest text here stays above 9px.
+ */
+
+.layer {
+  pointer-events: none;
+}
+
+/* --- stage columns ------------------------------------------------------- */
+
+/*
+ * The band is the sunken plane against the page plane — one designed step of
+ * tone, used at full strength so the column reads as a column in both themes
+ * rather than only in the light one, where the pair happens to be brighter.
+ */
+.columnBand {
+  fill: var(--surface-sunken);
+  stroke: none;
+}
+
+.columnRule {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.columnIndex {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+
+.columnLabel {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 19px;
+  font-weight: 640;
+  letter-spacing: 0.005em;
+}
+
+.columnCount {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.columnCountNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+/* --- machine-class groups ------------------------------------------------ */
+
+.groupBox {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.groupLabel {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 580;
+  letter-spacing: 0.015em;
+}
+
+/* --- nodes --------------------------------------------------------------- */
+
+.node {
+  pointer-events: none;
+}
+
+.node[data-dimmed='yes'] {
+  opacity: 0.3;
+}
+
+.disc {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.ringTrack {
+  stroke: var(--surface-sunken);
+}
+
+.proposedRing {
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+/*
+ * The code is one text element on two lines. The plant prefix repeats on every
+ * node in the view, so it is quiet; the part that identifies the machine is
+ * loud. Both are ink, never a series colour.
+ */
+.nodeCode {
+  font-family: var(--font-mono);
+}
+
+.nodePrefix {
+  fill: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.nodeName {
+  fill: var(--text-primary);
+  font-size: 16px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+
+.nodeValue {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.badgePlate {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.badgeText {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.focusRing {
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+
+.sourceRing {
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  opacity: 0.55;
+  stroke-dasharray: 2 3;
+}
+
+.targetChipPlate {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.targetChipText {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/*
+ * The node's hit target, and its drag handle. `touch-action: none` keeps a
+ * touch drag from being claimed by the browser as a page scroll mid-gesture;
+ * `grab` says out loud that the mark can be picked up, not only clicked.
+ */
+.hit {
+  fill: transparent;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.hit:active {
+  cursor: grabbing;
+}
+
+.node[data-state='selected'] .disc,
+.node[data-state='hovered'] .disc {
+  stroke: var(--border-strong);
+}
+
+/* Motion only where it explains something: the ring moving to its projected
+   value during a drag is the explanation. */
+@media (prefers-reduced-motion: no-preference) {
+  .ringValue {
+    transition: stroke-dashoffset 180ms ease, stroke 180ms ease;
+  }
+
+  .node {
+    transition: opacity 160ms ease;
+  }
+}
+
+/* --- partner dock -------------------------------------------------------- */
+
+.dock {
+  pointer-events: none;
+}
+
+.dockTitle {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.dockNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.dockPlate {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.dockCard[data-state='hovered'] .dockPlate,
+.dockCard[data-state='focused'] .dockPlate {
+  stroke: var(--border-strong);
+}
+
+.dockCode {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.dockCount {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+}
+
+.dockChevron {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+.dockCardNote {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.dockFocusRing {
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+
+.dockSlot[data-legal='no'] {
+  opacity: 0.3;
+}
+
+.dockSlotActive {
+  fill: var(--surface-sunken);
+  stroke: none;
+}
+
+.dockDot {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+}
+
+.dockSlotLabel {
+  fill: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dockOverflow {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+/* --- empty state --------------------------------------------------------- */
+
+.emptyPlate {
+  fill: var(--surface-1);
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+}
+
+.emptyTitle {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.emptyBody {
+  fill: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
