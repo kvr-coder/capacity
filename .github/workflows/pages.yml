@@ -42,6 +42,12 @@ jobs:
         run: VITE_BASE=/${{ github.event.repository.name }}/ npm run build
 
       - uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on for the repository if it is not already, using the
+          # `pages: write` permission above. Without this the first run fails
+          # with "Get Pages site failed" and someone has to go and flip a
+          # setting by hand before the workflow can ever succeed.
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
