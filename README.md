@@ -1,251 +1,307 @@
 # Capacity Cockpit
 
-An interactive **production capacity modeling cockpit** for a five-plant, four-continent
-manufacturing network. 15,000 SKUs, 150 work centers, weekly buckets over 18 months.
+**A tool for answering one question: can our factories actually make what we've promised — and if not, where does it break, and what can we do about it?**
 
-Planners see where the network runs out of hours, drag load from a saturated work center to
-one that can take it, turn OEE and run rate independently, ramp OEE along a glide path, and
-watch capacity move.
+Five plants on four continents. 15,000 products. 150 machines. Eighteen months of weekly
+plan. This shows you where the network runs out of hours, and lets you try fixes and see
+what they'd do — without touching the real plan.
 
-Everything runs in the browser. The model lives in a Web Worker; no backend, no data leaves
-the machine.
+Everything runs in your browser. No server, no database, no account, no data leaves your
+machine.
 
 ---
 
-## The model
+## Open it
 
-A **SKU** is made by walking a **routing** — an ordered list of **operations**, each
-performed at one **work center**. Routings are 2 to 7 operations long; a SKU can be moulded
-in Suzhou, shipped as a semi-finished part, and painted and packed in Wrocław.
+**Just want to look at it?** → [kvr-coder.github.io/capacity](https://kvr-coder.github.io/capacity/)
 
-A work center owns **two independent capacity pools**:
+Nothing to install. It's a website.
 
-```
-machine   count × shiftsPerDay × hoursPerShift × daysPerWeek × utilisationFactor
-labour    the same, over operators
-```
+**Want to run it yourself, without installing anything?**
+Click **Code → Codespaces → Create codespace** on the GitHub page. That gives you the whole
+development environment in a browser tab; it installs itself and opens the app.
 
-An operation consumes hours from both, and **either can bind**. That distinction is the
-point: a machine-bound work center wants capex, a labour-bound one wants hiring, and a
-single capacity number cannot tell you which.
-
-**Rate** and **OEE** are two independent knobs whose product is the effective rate:
-
-```
-effectiveRate = resolvedRate × resolvedOEE
-requiredHours = quantity / effectiveRate
-```
-
-Rate resolves routing operation → production version → SKU override. OEE resolves plant →
-work center → glide path → SKU×work-center override. Moving one never disturbs the other,
-so a planner can always see which knob they turned.
-
-Available hours are raw shift hours **minus dated downtime only**. Unplanned loss is
-already inside OEE — counting it twice is the easiest error in a model like this, and the
-tests guard against it.
-
-## Capability, and what a machine *could* do
-
-Two separate questions, deliberately kept apart:
-
-| Question | Source | Used for |
-|---|---|---|
-| What may this work center run? | The production-version **allow-list** | Planning. Always. |
-| What could it run? | Its **feature** set vs the operation's requirements | Proposals only |
-
-A generation-1 moulding machine has `{MOLD, TOL_C, CAV_2}`. A painting operation needs
-`{PAINT, CURE}`. It is not capable — but its machine class carries a retrofit that adds
-exactly those features for a known capex and lead time. The tool surfaces that as a costed
-candidate. The plan never uses it until someone approves it.
-
-That is why the network map can answer *"which machine could we repurpose?"* instead of
-only *"which machine is busy?"*.
-
-## Two plans and an inventory
-
-- **Supply plan** — what the plants have committed to. **This is what loads capacity.**
-- **Demand plan** — unconstrained customer demand. Reference only, drawn as a hairline.
-- **Inventory** — on hand, in transit, safety stock.
-
-The supply plan does not track demand, because it is constrained by inventory, projects and
-capacity. The distance between the two is the **plan gap**: demand the plan quietly chose
-not to serve. It is a headline number, not a footnote.
-
-## Sourcing rules
-
-In any week a SKU runs at exactly **one** work-center chain. The source **may change**
-between weeks — that is a dated transfer, and it is legal by default. Two sources in one
-week is **dual sourcing**, a different thing with different approvals, and it requires an
-explicit switch.
-
-## Downtime
-
-Planned loss is a typed, dated, work-center-scoped event you can argue with:
-
-`shutdown` · `project` · `qualification` · `maintenance` · `installation` · `changeover`
-
-Each names the pools it blocks — collective vacation drains **labour**, preventive
-maintenance drains **machine** — and carries a status. An `atRisk` event can be modelled
-with a slip, so "the installation runs four weeks late" is one field, not a rebuild.
-
-Unplanned loss has no date and lives in OEE.
-
-## What you can change
-
-Every change is a **move**: a named, dated, reversible object. Moves apply immediately and
-are undoable; a scenario is a list of them that reads as a decision log.
-
-`resourceMove` · `oeeSet` · `oeeGlide` · `rateSet` · `shiftChange` · `downtimeUpsert` ·
-`utilisationCeiling` · `retrofit` · `addWorkCenter` · `wipTransfer` · `planScale` ·
-`sourceSwitch`
-
-`addWorkCenter` seeds a machine that does not exist in master data yet by copying a
-sibling's features and pools — so a capex proposal can be modelled before anyone buys
-anything.
-
-## The screens
-
-| Screen | What it answers |
-|---|---|
-| **Cockpit** | Where does the network run out, and what is the plan gap? |
-| **Network map** | Zoomable globe → plant → work center, with capability links and drag-and-drop |
-| **Work centers** | The register, and the hour-by-hour build-up for one machine |
-| **Products** | What the network is making, by family, group and SKU |
-| **Scenarios** | The decision log, and this plan against another |
-| **Data** | Master data, and SAP import/export |
-
-## The five plants
-
-| Plant | Site | Region | Role |
-|---|---|---|---|
-| `US-TOL` | Toledo, Ohio, US | NAM | High automation, best OEE, expensive hours |
-| `MX-SLP` | San Luis Potosí, MX | NAM | The NAM cost play |
-| `DE-ING` | Ingolstadt, DE | EUR | The flagship — highest labour, deepest capability |
-| `PL-WRO` | Wrocław, PL | EUR | The EUR cost play, growing |
-| `CN-SUZ` | Suzhou, CN | APAC | Cheapest hours, longest transit |
-
-## Data
-
-The mock data factory is deterministic — a seeded PRNG, no `Math.random`, no `Date.now`.
-The same profile produces byte-identical output every time.
-
-```bash
-npm run generate:extract              # writes SAP-shaped CSVs to mock/extract/
-npm run generate:extract -- --profile=demo
-```
-
-It emits the extract objects a real SAP pull would give you — `MARA`, `MARC`, `MAST`,
-`STPO`, `PLKO`, `PLPO`, `MAPL`, `CRHD`, `CRCA`, `KAKO`, `KAPA`, plus `DEMAND`, `SUPPLY` and
-`INVENTORY` — and the loader parses them back. A round-trip test asserts the reconstruction
-is lossless, so the integration path is real from day one rather than deferred.
-
-Two things standard SAP objects cannot express are carried as clearly-named extensions:
-work-center **features** and **OEE** overrides/glide paths. Being explicit about that seam
-beats pretending `CRHD` carries them.
-
-Profiles: `demo` (1,500 SKUs / 40 work centers), `standard` (15,000 / 150), `large`
-(30,000 / 240).
-
-## Launching it
+**Want it on your own machine?** You'll need [Node.js](https://nodejs.org) 20 or newer.
 
 ```bash
 git clone https://github.com/kvr-coder/capacity.git
 cd capacity
 npm install
-npm start              # opens http://localhost:5173 in your browser
+npm start
 ```
 
-`npm start` is the whole thing — no backend, no database, no API keys. First paint takes a
-few seconds while the worker generates 15,000 SKUs; the loading screen reports what it is
-doing.
+That opens `http://localhost:5173`. The first screen takes a few seconds while it builds the
+15,000-product dataset — the loading bar says what it's doing.
 
-If you only want to look at a production build:
+> **Why can't I just open the files from GitHub?** The source is written in TypeScript, which
+> browsers can't run directly. It has to be compiled into plain JavaScript first — that's what
+> `npm start` and the hosted link both do for you.
+
+---
+
+## The idea in one minute
+
+If you've never done capacity planning, here's the whole concept.
+
+**A machine has hours.** A work center running 2 shifts × 8 hours × 5 days has 80 hours a
+week. That's all it will ever have.
+
+**A plan asks for units.** "Make 40,000 housings in week 12."
+
+**A rate converts between them.** If the machine makes 500 housings an hour, 40,000 units
+needs 80 hours.
+
+**Utilisation is the comparison.** Needs 80 hours, has 80 hours → 100% utilised. Needs 95 →
+119%, which is impossible. Something doesn't get made.
+
+That impossible number is a **bottleneck**, and the whole job is: find them, then decide what
+to do. Usually one of:
+
+| Fix | When it helps |
+|---|---|
+| Move the work to another machine | Something else has spare hours and is allowed to make it |
+| Add a shift | The machine is idle part of the week |
+| Hire more operators | The *people* ran out before the machine did |
+| Improve OEE | The machine loses time to changeovers, small stops, scrap |
+| Modify a machine | It *could* do the job with a retrofit you'd have to pay for |
+
+This tool shows you all five, with the numbers attached.
+
+---
+
+## Your first five minutes
+
+A guided walkthrough. Open the app and follow along.
+
+### 1. Start at the Cockpit
+
+The big number is **network utilisation** — how hard the whole network is working. Around
+80% is healthy: busy, with room to absorb surprises.
+
+But the network average hides everything interesting. Look at the tiles beside it:
+
+- **Peak utilisation** — the single worst machine-week anywhere. If this is 145%, one machine
+  somewhere is being asked for half again more hours than it has.
+- **Overloaded work-center weeks** — how many machine-weeks are over the line.
+- **Plan gap** — demand the plan already decided not to serve.
+- **Shortfall units** — what the network physically cannot make.
+- **Machine-bound vs labour-bound** — of the overloaded machines, how many ran out of
+  *machine* hours versus *operator* hours. This decides whether the answer is money or
+  people, and it's the most useful number on the screen.
+
+### 2. Read the grid
+
+Scroll to **"Where the network runs out"**. Every row is a machine, every column a week.
+
+- **Blue** = spare capacity
+- **Grey** = right at the limit
+- **Red** = over the limit
+- **Hatched** = shut down that week (maintenance, holiday, a project)
+- **▲** = so far over it had to be clipped
+
+You should see it drift from blue on the left to red on the right. That's the story: the
+network is comfortable now and tightens later. **Click any red cell.**
+
+### 3. Look for relief
+
+Clicking a cell selects that machine and shows **relief options** — other work centers that
+could take some of its load. Each one is labelled:
+
+| Label | Meaning |
+|---|---|
+| **Approved** | Allowed today. Use it now, costs nothing. |
+| **Needs qualification** | Physically capable, but not signed off. Takes time. |
+| **Needs retrofit** | Would work if you modified it. Shows the price and the lead time. |
+
+That distinction is the point of the tool. A machine being *able* to do something and being
+*allowed* to do it are different facts, and only one of them is in your ERP system.
+
+### 4. Try a fix, then undo it
+
+Drag the **utilisation ceiling** slider down to 90%. This says "don't plan above 90% of the
+hours that exist" — realistic, because nobody runs flat out. Watch every number update.
+
+Notice the header: you started on **Baseline**, and it switched to **Scenario 1**. The
+baseline is read-only on purpose — it's what the real master data says, so nothing can
+quietly change it. Your edit forked a working copy automatically.
+
+Now press **Undo**. Everything goes back.
+
+**Every change works this way.** It applies immediately, it's listed in plain English on the
+Scenarios screen, and it can be taken back.
+
+### 5. See the network
+
+Go to **Network map**. You start on a globe with five plants, each a circle sized by capacity
+and coloured by how loaded it is.
+
+**Click a plant.** You zoom into its machines, arranged left to right by process stage —
+moulding, then painting, then packing. Each machine shows its code, a utilisation ring, and
+an **L** badge if operators are the constraint rather than the machine.
+
+Down the right edge are the **other plants**, showing how many machines there share a
+capability with this one. Hover a machine to see its links. **Backspace** goes back out.
+
+### 6. Turn the OEE knob
+
+Go to **Work centers**, click any row. Scroll to **OEE**.
+
+You'll see two controls that deliberately never touch each other:
+
+- **The OEE ramp** — a curve showing OEE improving over time. Drag the handle on the right,
+  or focus it and use arrow keys. This models an improvement programme: "we'll get this line
+  from 77% to 85% over twelve weeks."
+- **The run rate** — how many units per hour the machine makes.
+
+Both change capacity, and they're separate on purpose, so you can always see which one you
+moved.
+
+---
+
+## The six screens
+
+| Screen | Use it to answer |
+|---|---|
+| **Cockpit** | Where does the network run out, and what is it costing us? |
+| **Network map** | Where physically is everything, and what could take load from what? |
+| **Work centers** | What's happening at one machine, hour by hour? |
+| **Products** | What are we being asked to make, and which products aren't getting served? |
+| **Scenarios** | What did we change, and what did it do? |
+| **Data** | What's the underlying master data, and can I export it? |
+
+---
+
+## Words you'll see
+
+| Word | What it means |
+|---|---|
+| **Work center** | A machine or group of machines that does one kind of job. The thing that has hours. |
+| **Routing** | The ordered list of steps to make a product. Mould → trim → paint → inspect → pack. |
+| **Operation** | One step in a routing, done at one work center. |
+| **Machine pool / labour pool** | A work center has two separate limits: machine hours and operator hours. Either can run out first. |
+| **Binding pool** | Which of the two ran out. Machine-bound → buy equipment. Labour-bound → hire people. |
+| **OEE** | Overall Equipment Effectiveness. What fraction of time the machine is actually producing good parts. 0.80 means 80%. |
+| **Run rate** | Units per hour when it *is* running. Separate from OEE. |
+| **Ceiling** | The utilisation you refuse to plan above. Set it to 90% and anything over reads as overload even though the hours technically exist. |
+| **Supply plan** | What the factories have committed to make. **This is what consumes capacity.** |
+| **Demand plan** | What customers actually want. Reference only. |
+| **Plan gap** | Demand minus supply. What the plan chose not to serve. |
+| **Shortfall** | What the plan wanted but the machines physically can't produce. |
+| **Setup / changeover** | Time lost switching a machine from one product to another. Charged once per product per week. |
+| **Yield** | Fraction of good parts. 0.98 means you must start 102 to finish 100 — and that compounds backwards up the routing. |
+| **Downtime event** | Planned, dated lost time: maintenance, a project, a shutdown, a qualification. |
+| **WIP transfer** | Shipping a half-finished part to another plant to complete it. |
+| **Dual sourcing** | Making one product in two places *in the same week*. Different from moving it, which is a dated switch. |
+| **Retrofit** | Modifying a machine so it can do something new. Costs money, takes weeks. |
+| **Glide path** | A planned improvement over time, rather than a step change. |
+| **Move** | Any change you make. Named, dated, and undoable. |
+| **Scenario** | A list of moves. Your plan-B, comparable against the baseline. |
+
+---
+
+## Changing things
+
+Everything you can change is a **move**, and every move follows the same three rules:
+
+1. **It applies immediately.** No Apply button anywhere.
+2. **It can be undone.** Ctrl/Cmd-Z, or the undo arrow in the header.
+3. **It's written down.** The Scenarios screen lists every move in plain English, in order.
+   You could hand that list to a colleague and they'd know exactly what you proposed.
+
+You can move load between machines, set or ramp OEE, change a run rate, change shifts, add
+or edit downtime, set a utilisation ceiling, retrofit a machine, invent a machine that
+doesn't exist yet, transfer half-finished work between plants, scale a plan, or switch a
+product's source on a date.
+
+The **baseline can't be edited** — it's what master data says. Editing it forks a scenario
+automatically and tells you it did.
+
+---
+
+## Using your own data
+
+The built-in dataset is generated, but it's shaped like a real SAP extract on purpose.
+
+**Export** — the Data screen downloads every table: `MARA`, `MARC`, `MAST`, `STPO`, `PLKO`,
+`PLPO`, `MAPL`, `CRHD`, `CRCA`, `KAKO`, `KAPA`, plus `DEMAND`, `SUPPLY` and `INVENTORY`.
+
+**Import** — feed the same shapes back in. The loader finds columns by name, so extra columns
+don't matter and column order doesn't matter. Problems are reported per row with the table
+and row number, all at once rather than one at a time, and you choose whether to import the
+valid rows anyway.
+
+Two things standard SAP tables can't express ship as clearly-named extensions rather than
+being smuggled into a field that doesn't mean that: machine **features** (what a machine is
+physically capable of) and **OEE** overrides and ramps.
 
 ```bash
-npm run build && npm run preview      # http://localhost:4173
+npm run generate:extract                    # writes the CSVs to mock/extract/
+npm run generate:extract -- --profile=demo  # a smaller one
 ```
 
-### A hosted link
+Profiles: `demo` (1,500 products / 40 machines), `standard` (15,000 / 150), `large`
+(30,000 / 240).
 
-`.github/workflows/pages.yml` publishes the built app to GitHub Pages on every push to
-`main`, and can be run by hand from the **Actions** tab to publish any branch. Enable it once
-under **Settings → Pages → Source → GitHub Actions**, and the app lands at
-`https://kvr-coder.github.io/capacity/`.
+---
 
-One caveat worth knowing before you try: **GitHub Pages on a private repository requires a
-paid plan** (Pro, Team or Enterprise). On the free plan the workflow will fail at the deploy
-step. The alternatives are to make the repo public, or to drop `dist/` on any static host —
-it is plain files, and the `VITE_BASE` env var sets the subpath.
+## For developers
 
 ```bash
-npm run typecheck
-npm test               # model + SAP round-trip
+npm start          # dev server
+npm run build      # production bundle into dist/
+npm run typecheck  # tsc -b, strict + noUncheckedIndexedAccess
+npm test           # 436 unit tests
 npm run lint
-npm run build
-npm run uxtest         # drives the built app in Chromium and screenshots every screen
+npm run uxtest     # drives the built app in Chromium, screenshots every screen
+npx vite-node scripts/diagnose.ts   # asserts the dataset's calibration bands
 ```
-
-Deploying to a subpath:
-
-```bash
-VITE_BASE=/capacity/ npm run build
-```
-
-## Layout
 
 ```
 src/
-  domain/    pure model — no React, no DOM, deterministic, unit-tested
+  domain/    the model — pure, deterministic, no React, no DOM
   data/      mock data factory, SAP writer and loader
   worker/    the engine's home, and the typed client that talks to it
   state/     zustand UI state + worker-backed hooks
   charts/    hand-built SVG chart kit
   canvas/    the zoomable network map
   routes/    one file per screen
-  components/ shell, filter bar, shared UI
-  lib/       format, CSV, storage
-  styles/    design tokens + global CSS
+  components/, lib/, styles/
 ```
 
-`src/domain` imports nothing above it and touches no browser API. The model lifts into
-Node, a CLI or a server unchanged — which is the migration path when this outgrows the
-browser.
+**Architecture, briefly.** At 15,000 products the shape isn't a style choice. The dataset
+never leaves the Web Worker; only aggregates and paged slices cross to the UI. Dense results
+are `Float64Array` indexed `row * weekCount + week`. The engine rebuilds the 150 × 78 grids
+on every run (~390ms) and computes per-product detail only for what you've selected. The
+runtime is shown in the header so a regression is visible rather than merely felt.
 
-## Performance
+`src/domain` imports nothing above it and touches no browser API, so the model lifts into
+Node or a server unchanged. That's the migration path when this outgrows the browser, around
+20–30k products.
 
-At 15,000 SKUs the architecture is not a style choice:
+**One rule worth knowing before you change the model:** OEE is applied to the *rate* and
+nowhere else. Available hours stay raw shift hours minus dated downtime, because unplanned
+loss already lives inside OEE. Applying it in both places inflates every required hour by
+`1/OEE` — a ~20% error that looks entirely plausible on a chart and survives a long way into
+a capex conversation. There's a boxed comment in `rates.ts` and a test that fails if anyone
+does it.
 
-- Nothing sized SKU × week enters React state. The worker returns aggregates.
-- Dense results are `Float64Array` indexed `row * weekCount + week`.
-- The engine materialises the work-center × week grids (11,700 cells) on every run; SKU
-  detail is computed only for the selected slice.
-- `ModelResult.runtimeMs` is displayed in the header, so a regression is visible rather
-  than merely felt.
+`CLAUDE.md` has the full conventions, including the data-visualisation rules the charts were
+built and validated against.
 
-The browser ceiling is roughly 20–30k SKUs. Past that this wants a server, and the domain
-package is written so that is a configuration change rather than a port.
+---
 
-## A note on the charts
+## What this doesn't do
 
-There is no charting library. Every chart is hand-built SVG — except the utilisation grid,
-which draws 11,700 cells to a `<canvas>` with a thin SVG interaction layer on top, because
-an 11,700-node SVG does not stay interactive.
+Worth knowing before you trust a number:
 
-The palette was checked with a CVD and contrast validator in both light and dark mode.
-Colour follows the **entity**: a plant owns its hue for the life of the app, so filtering
-never repaints the survivors. Utilisation against a ceiling is **polarity**, so it is
-diverging — cool below, neutral at the ceiling, warm above — never a rainbow and never a
-sequential ramp.
-
-Changing a hex in `src/styles/tokens.css` invalidates that validation. Re-run it first.
-
-## Caveats
-
-- Single-period allocation. No inventory carried between weeks, no lot sizing, no
-  lead-time offset between the week a part is made and the week it is needed.
-- Tooling and moulds are not modelled as a shared cross-work-center pool. For moulding this
-  is often the real constraint, and the pool structure is built to accept it as a third
-  pool — but it is not in this version.
-- The relief search is a ranked heuristic, not an optimiser. It is deterministic and
-  explainable, which for capacity planning is usually the better trade.
-- Demand is a single deterministic plan. No stochastic demand, no service-level buffering.
+- **No inventory between weeks.** Each week is solved on its own. You can't build ahead in
+  week 10 to cover week 14.
+- **No lot sizing or sequencing.** Setup is charged once per product per machine per week,
+  which is an approximation of a real changeover schedule.
+- **Tooling isn't modelled.** For moulding, the mould is often the real constraint — and a
+  mould can only be in one machine at a time. The two-pool structure would accept a third
+  pool for it, but it isn't there yet.
+- **Demand is one fixed plan.** No probability, no safety-stock logic.
+- **Relief search is a ranked heuristic, not an optimiser.** It's deterministic and
+  explainable, which for this kind of planning is usually the better trade — but it won't
+  claim to have found the best possible answer, because it hasn't looked.
