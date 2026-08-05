@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { SOURCING_PLANES, resolveSourcing, sourcingIndex } from '@/domain/sourcing'
 import { buildIndexes } from '@/domain/indexes'
+import { applyMoves } from '@/domain/moves'
+import { buildOeeGrid } from '@/domain/oee'
+import { buildCapacity, buildCeilings } from '@/domain/capacity'
+import { buildLoad } from '@/domain/load'
+import { at } from '@/domain/lookup'
 import type {
   Material,
   Plant,
@@ -436,5 +441,105 @@ describe('resolveSourcing — the single-source rule', () => {
     ])
     expect(bucketsWithTwoSources(plan.routingOfRow)).toBe(0)
     expect(plan.dualSourced.size).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The seam between moves.ts and sourcing.ts
+// ---------------------------------------------------------------------------
+
+/**
+ * The whole pipeline a drag actually goes through, so the assertion is on
+ * HOURS and not on an index. `resolveSourcing` can only point a supply row at a
+ * routing that exists; `applyMoves` is what has to mint one.
+ */
+function machineHoursByWorkCenter(moves: ScenarioMove[]): Map<string, number> {
+  const snap = snapshot()
+  const applied = applyMoves(snap, scenario(moves))
+  const moved = applied.snapshot
+  const idx = buildIndexes(moved)
+  const oee = buildOeeGrid(moved, idx)
+  const capacity = buildCapacity(moved, idx)
+  const ceilings = buildCeilings(applied.effectiveScenario, 1)
+  const plan = resolveSourcing(moved, idx, applied.effectiveScenario)
+  const load = buildLoad(moved, idx, plan, capacity, oee, ceilings)
+  const grid = load.grids.machine
+  const out = new Map<string, number>()
+  for (let row = 0; row < grid.workCenterIds.length; row++) {
+    const id = grid.workCenterIds[row]
+    if (id === undefined) continue
+    let total = 0
+    for (let w = 0; w < grid.weekCount; w++) total += grid.requiredHours[row * grid.weekCount + w] ?? 0
+    out.set(id, total)
+  }
+  return out
+}
+
+describe('resourceMove onto a work center with no pre-existing routing version', () => {
+  // M1 at P1 runs only on WC-1, and master data carries NO version of it that
+  // runs on WC-2. This is the common case, and it used to be skipped with a
+  // warning, which made the product's headline interaction inert.
+  const drag: ScenarioMove['move'] = {
+    kind: 'resourceMove',
+    selector: { kind: 'material', id: 'M1' },
+    fromWorkCenterId: 'WC-1',
+    toWorkCenterId: 'WC-2',
+    fromWeek: 0,
+    toWeek: WEEKS - 1,
+    share: 1,
+    allowDualSource: false,
+  }
+
+  it('relocates the volume instead of warning about it', () => {
+    const before = machineHoursByWorkCenter([])
+    const after = machineHoursByWorkCenter([move(1, drag)])
+
+    const sourceBefore = before.get('WC-1') ?? 0
+    const sourceAfter = after.get('WC-1') ?? 0
+    const targetBefore = before.get('WC-2') ?? 0
+    const targetAfter = after.get('WC-2') ?? 0
+
+    expect(sourceBefore).toBeGreaterThan(0)
+    expect(sourceAfter).toBeLessThan(sourceBefore)
+    expect(targetAfter).toBeGreaterThan(targetBefore)
+    // The two work centers are identical here, so nothing may appear or vanish
+    // in the move: what left one arrives at the other.
+    expect(sourceBefore - sourceAfter).toBeCloseTo(targetAfter - targetBefore, 9)
+  })
+
+  it('synthesises exactly one scenario-sourced version, deterministically', () => {
+    const snap = snapshot()
+    const first = applyMoves(snap, scenario([move(1, drag)])).snapshot
+    const second = applyMoves(snap, scenario([move(1, drag)])).snapshot
+    const synthesised = first.routings.filter((r) => r.source === 'scenario')
+    expect(synthesised).toHaveLength(1)
+    expect(second.routings.map((r) => r.id)).toEqual(first.routings.map((r) => r.id))
+
+    const version = at(synthesised, 0, 'synthesised routing')
+    expect(version.primary).toBe(false)
+    expect(version.materialId).toBe('M1')
+    expect(version.plantId).toBe('P1')
+    expect(version.operations.map((o) => o.workCenterId)).toEqual(['WC-2'])
+    // Master data is never rewritten, only appended to.
+    expect(snap.routings.some((r) => r.source === 'scenario')).toBe(false)
+    expect(first.routings.slice(0, snap.routings.length)).toEqual(snap.routings)
+  })
+
+  it('still refuses a target that cannot run the operation at all', () => {
+    // WC-3 appears in no routing at all here: it is approved for nothing, and
+    // with no standard operation on file its feature requirements are unknown
+    // — "we do not know what this needs" is not "it needs nothing".
+    const snap = snapshot([
+      routing('R-M1-P1', 'M1', 'P1', 'WC-1', true),
+      routing('R-M2-P1-a', 'M2', 'P1', 'WC-1', true),
+      routing('R-M2-P1-b', 'M2', 'P1', 'WC-2', false),
+    ])
+    const applied = applyMoves(
+      snap,
+      scenario([move(1, { ...drag, toWorkCenterId: 'WC-3' })]),
+    )
+    expect(applied.snapshot.routings.some((r) => r.source === 'scenario')).toBe(false)
+    expect(applied.warnings.join(' ')).toContain('not approved')
+    expect(at(applied.effectiveScenario.moves, 0, 'move').enabled).toBe(false)
   })
 })

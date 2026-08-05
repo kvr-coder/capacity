@@ -288,6 +288,17 @@ export interface Routing {
   /** Undefined = approved for the whole horizon. */
   validFromWeek?: WeekIndex
   validToWeek?: WeekIndex
+  /**
+   * Where this version came from. Same rule and the same reason as
+   * {@link OeeOverride.source}: absent (or `'master'`) means master data,
+   * `'scenario'` means `applyMoves` SYNTHESISED it so a `resourceMove` could
+   * put an operation on a work center master data carries no version for.
+   *
+   * A synthesised version is a modelled proposal, never planning truth: it is
+   * never `primary`, and the run's warnings say what would have to be true — a
+   * qualification, a retrofit — before the plan it implies is executable.
+   */
+  source?: 'master' | 'scenario'
 }
 
 // ---------------------------------------------------------------------------

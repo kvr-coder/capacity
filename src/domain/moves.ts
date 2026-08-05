@@ -19,13 +19,25 @@
  * ---------------------------------------------------------------------------
  * Moves that do not change the snapshot
  * ---------------------------------------------------------------------------
- * Three variants are consumed elsewhere and deliberately leave the snapshot
- * alone:
+ * Three variants are consumed elsewhere and deliberately leave the plan alone:
  *
  *   `resourceMove`  and `sourceSwitch`   -> `sourcing.ts` reads them off the
  *                   scenario, because "which routing makes this in which week"
  *                   is not a property of master data.
  *   `utilisationCeiling`                 -> `buildCeilings` in `capacity.ts`.
+ *
+ * ---------------------------------------------------------------------------
+ * Synthesised production versions — the seam `resourceMove` runs through
+ * ---------------------------------------------------------------------------
+ * `sourcing.ts` can only point a supply row at a routing that EXISTS. Routing
+ * versions are per (material, plant), so "drag this load onto that machine"
+ * almost never has a version waiting for it, and the move used to be skipped
+ * with a warning — the headline interaction of the product did nothing.
+ *
+ * So `resourceMove` does touch the snapshot after all: it MATERIALISES the
+ * version the drag implies. See {@link synthesiseForResourceMove}. What it may
+ * not do is invent approval — the capability model decides whether the lane is
+ * allowed to exist at all, and a refusal stays a refusal.
  *
  * They are still *validated* here, and an illegal one is switched off in the
  * returned `effectiveScenario` rather than being left to produce a plan nobody
@@ -55,6 +67,7 @@
 
 import type {
   DowntimeEvent,
+  FeatureId,
   MachineClass,
   MachineClassId,
   Material,
@@ -69,9 +82,13 @@ import type {
   PlantId,
   RateOverride,
   RetrofitOption,
+  Routing,
+  RoutingId,
+  RoutingOperation,
   Scenario,
   ScenarioMove,
   Snapshot,
+  StandardOperation,
   WeekIndex,
   WorkCenter,
   WorkCenterId,
@@ -120,6 +137,9 @@ interface Working {
   glidePaths: OeeGlidePath[] | null
   rateOverrides: RateOverride[] | null
   downtime: DowntimeEvent[] | null
+  routings: Routing[] | null
+  /** Ids of synthesised versions, so two moves cannot mint the same one twice. */
+  synthesisedRoutingIds: Set<RoutingId>
   supplyPlan: PlanMatrix | null
   demandPlan: PlanMatrix | null
 }
@@ -134,6 +154,8 @@ function newWorking(base: Snapshot): Working {
     glidePaths: null,
     rateOverrides: null,
     downtime: null,
+    routings: null,
+    synthesisedRoutingIds: new Set<RoutingId>(),
     supplyPlan: null,
     demandPlan: null,
   }
@@ -201,6 +223,14 @@ function downtimeOf(w: Working): DowntimeEvent[] {
   if (w.downtime === null) w.downtime = [...w.base.downtime]
   return w.downtime
 }
+/**
+ * The routing list, copied once. Only ever APPENDED to: an existing production
+ * version is master data and a scenario has no business rewriting one.
+ */
+function routingsOf(w: Working): Routing[] {
+  if (w.routings === null) w.routings = [...w.base.routings]
+  return w.routings
+}
 
 /** Row keys are shared; only the values are copied, and only once. */
 function planOf(w: Working, plan: 'supply' | 'demand'): PlanMatrix {
@@ -234,6 +264,7 @@ function finish(w: Working): Snapshot {
     w.glidePaths === null &&
     w.rateOverrides === null &&
     w.downtime === null &&
+    w.routings === null &&
     w.supplyPlan === null &&
     w.demandPlan === null
   ) {
@@ -246,6 +277,7 @@ function finish(w: Working): Snapshot {
     glidePaths: w.glidePaths ?? base.glidePaths,
     rateOverrides: w.rateOverrides ?? base.rateOverrides,
     downtime: w.downtime ?? base.downtime,
+    routings: w.routings ?? base.routings,
     supplyPlan: w.supplyPlan ?? base.supplyPlan,
     demandPlan: w.demandPlan ?? base.demandPlan,
     meta:
@@ -277,6 +309,13 @@ interface Derived {
   plantById: Map<PlantId, Plant> | null
   /** Operations master data permits at each work center. One routing scan. */
   approvedOpsByWorkCenter: Map<WorkCenterId, Set<OperationId>> | null
+  stdOpById: Map<OperationId, StandardOperation> | null
+  /**
+   * key(materialId, plantId) -> the version planning picks today. Same tie-break
+   * as `buildIndexes`: the first `primary`, else the first version at all, so
+   * "the currently-selected routing" means the same thing in both files.
+   */
+  primaryRouting: Map<string, Routing> | null
 }
 
 function newDerived(snap: Snapshot): Derived {
@@ -288,7 +327,33 @@ function newDerived(snap: Snapshot): Derived {
     classById: null,
     plantById: null,
     approvedOpsByWorkCenter: null,
+    stdOpById: null,
+    primaryRouting: null,
   }
+}
+
+function stdOpsById(d: Derived): Map<OperationId, StandardOperation> {
+  if (d.stdOpById === null) {
+    const map = new Map<OperationId, StandardOperation>()
+    for (const op of d.snap.standardOperations) map.set(op.id, op)
+    d.stdOpById = map
+  }
+  return d.stdOpById
+}
+
+function primaryRoutings(d: Derived): Map<string, Routing> {
+  if (d.primaryRouting === null) {
+    const map = new Map<string, Routing>()
+    const first = new Map<string, Routing>()
+    for (const routing of d.snap.routings) {
+      const k = key(routing.materialId, routing.plantId)
+      if (!first.has(k)) first.set(k, routing)
+      if (routing.primary && !map.has(k)) map.set(k, routing)
+    }
+    for (const [k, routing] of first) if (!map.has(k)) map.set(k, routing)
+    d.primaryRouting = map
+  }
+  return d.primaryRouting
 }
 
 function materialsById(d: Derived): Map<MaterialId, Material> {
@@ -426,6 +491,348 @@ function weekSpan(fromWeek: WeekIndex, toWeek: WeekIndex): string {
 }
 
 // ---------------------------------------------------------------------------
+// Synthesising the production version a drag implies
+// ---------------------------------------------------------------------------
+
+type ResourceMove = Extract<Move, { kind: 'resourceMove' }>
+
+/**
+ * What the target work center may claim about one standard operation.
+ *
+ * The first four are `capability.ts`'s four bases, computed here from the BASE
+ * snapshot because `applyMoves` runs before `buildIndexes` — and, more
+ * importantly, because the versions this file is about to synthesise would
+ * otherwise make the target look `approved` for an operation nobody approved
+ * it for. `retrofitCovered` is the fifth: not capable as it stands, but this
+ * scenario carries a retrofit for this work center whose features close the
+ * whole gap, which is exactly the pairing the canvas drag creates.
+ */
+type LaneBasis = 'approved' | 'featureCapable' | 'retrofitCovered' | 'retrofit' | 'none'
+
+/** Allowed to run: the first three model a lane, the last two refuse one. */
+function laneIsViable(basis: LaneBasis): boolean {
+  return basis === 'approved' || basis === 'featureCapable' || basis === 'retrofitCovered'
+}
+
+/**
+ * Faster machines run faster; automated ones need less labour per unit.
+ *
+ * These two curves are the factory's (`generationRateFactor` /
+ * `automationFactor` in `src/data/factory.ts`), restated here because
+ * `src/domain` may not import from `src/data` and because they are properties
+ * of `MachineClass.generation`, which every Snapshot carries whatever generated
+ * it. They are only ever reached for a target that has never run the operation;
+ * where the snapshot has observed times at the target, those win.
+ */
+function generationRateFactor(generation: number): number {
+  switch (generation) {
+    case 1:
+      return 0.85
+    case 2:
+      return 0.95
+    case 3:
+      return 1.05
+    default:
+      return 1.15
+  }
+}
+
+function automationFactor(generation: number): number {
+  switch (generation) {
+    case 1:
+      return 1.35
+    case 2:
+      return 1.1
+    case 3:
+      return 0.9
+    default:
+      return 0.75
+  }
+}
+
+function round6(value: number): number {
+  return Math.round(value * 1e6) / 1e6
+}
+
+/** Per-unit times a work center actually achieves on an operation, observed. */
+interface ObservedTimes {
+  machineHoursPerUnit: number
+  labourHoursPerUnit: number
+}
+
+/**
+ * Everything one `resourceMove` needs to know about the snapshot, gathered in a
+ * single pass over the routings rather than one pass per material.
+ */
+interface MoveScan {
+  /** Pairs `key(materialId, targetPlantId)` that ALREADY run at the target. */
+  pairsAtTarget: Set<string>
+  /** Mean per-unit times the target achieves today, by standard operation. */
+  observedAtTarget: Map<OperationId, ObservedTimes>
+}
+
+function scanForMove(snap: Snapshot, toWorkCenterId: WorkCenterId): MoveScan {
+  const pairsAtTarget = new Set<string>()
+  const sums = new Map<OperationId, { machine: number; labour: number; n: number }>()
+  for (const routing of snap.routings) {
+    for (const op of routing.operations) {
+      if (op.workCenterId !== toWorkCenterId) continue
+      pairsAtTarget.add(key(routing.materialId, routing.plantId))
+      if (!(op.baseQty > 0)) continue
+      const entry = sums.get(op.opId)
+      const machine = op.machineHoursPerBase / op.baseQty
+      const labour = op.labourHoursPerBase / op.baseQty
+      if (entry === undefined) sums.set(op.opId, { machine, labour, n: 1 })
+      else {
+        entry.machine += machine
+        entry.labour += labour
+        entry.n += 1
+      }
+    }
+  }
+  const observedAtTarget = new Map<OperationId, ObservedTimes>()
+  for (const [opId, entry] of sums) {
+    if (entry.n === 0) continue
+    observedAtTarget.set(opId, {
+      machineHoursPerUnit: entry.machine / entry.n,
+      labourHoursPerUnit: entry.labour / entry.n,
+    })
+  }
+  return { pairsAtTarget, observedAtTarget }
+}
+
+/**
+ * The operation as the TARGET would run it.
+ *
+ * A different machine runs at a different rate, so copying the source's times
+ * across would model a move that changes nothing but the name on the hours —
+ * the one number a planner is dragging the load to find out.
+ *
+ * Two bases, in order:
+ *
+ *   1. **Observed.** The mean per-unit times the target already achieves on
+ *      this standard operation across the whole snapshot. This is the same
+ *      basis the factory generated from (its rate band, narrowed by the
+ *      machine's generation) as realised on this specific machine, so a
+ *      synthesised version is indistinguishable in kind from a generated one.
+ *   2. **Scaled.** When the target has never run the operation there is nothing
+ *      to observe, so the source's times are scaled by the ratio of the two
+ *      machines' generation curves — faster machine, fewer machine hours; more
+ *      automated machine, less labour per unit. This is an APPROXIMATION: it
+ *      assumes the two machines sit in the same rate band for the operation,
+ *      which is what "feature-capable for it" claims and no more.
+ *
+ * `setupHours` and `yield` are kept from the source operation: neither has a
+ * better basis at the target, and inventing one would be precise-looking noise.
+ */
+function retimeOperation(
+  op: RoutingOperation,
+  scan: MoveScan,
+  toWorkCenterId: WorkCenterId,
+  sourceGeneration: number,
+  targetGeneration: number,
+): RoutingOperation {
+  const observed = scan.observedAtTarget.get(op.opId)
+  let machinePerUnit: number
+  let labourPerUnit: number
+  if (observed !== undefined && observed.machineHoursPerUnit > 0) {
+    machinePerUnit = observed.machineHoursPerUnit
+    labourPerUnit = observed.labourHoursPerUnit
+  } else {
+    const sourceMachinePerUnit = op.baseQty > 0 ? op.machineHoursPerBase / op.baseQty : 0
+    const sourceLabourPerUnit = op.baseQty > 0 ? op.labourHoursPerBase / op.baseQty : 0
+    const rateRatio = generationRateFactor(sourceGeneration) / generationRateFactor(targetGeneration)
+    machinePerUnit = sourceMachinePerUnit * rateRatio
+    const labourMultiple = sourceMachinePerUnit > 0 ? sourceLabourPerUnit / sourceMachinePerUnit : 0
+    labourPerUnit =
+      machinePerUnit *
+      labourMultiple *
+      (automationFactor(targetGeneration) / automationFactor(sourceGeneration))
+  }
+  return {
+    seq: op.seq,
+    opId: op.opId,
+    workCenterId: toWorkCenterId,
+    baseQty: op.baseQty,
+    setupHours: op.setupHours,
+    machineHoursPerBase: round6(machinePerUnit * op.baseQty),
+    labourHoursPerBase: round6(labourPerUnit * op.baseQty),
+    yield: op.yield,
+  }
+}
+
+/**
+ * Materialise, for every selected material, the production version that runs
+ * the source work center's operation(s) at the TARGET work center.
+ *
+ * Only the operations currently at the source move. The rest of the routing is
+ * untouched, because moving one operation is what a planner means by taking
+ * load off a machine — the part is still painted where it was painted.
+ *
+ * Nothing is synthesised where master data already has a version that runs at
+ * the target (`sourcing.ts` will find it), and nothing is synthesised for a
+ * lane the capability model refuses.
+ */
+function synthesiseForResourceMove(
+  working: Working,
+  derived: Derived,
+  move: ResourceMove,
+  basisOf: (opId: OperationId) => LaneBasis,
+  label: string,
+  warn: (message: string) => void,
+): void {
+  const snap = derived.snap
+  const sourceWc = readWorkCenter(working, move.fromWorkCenterId)
+  const targetWc = readWorkCenter(working, move.toWorkCenterId)
+  if (sourceWc === undefined || targetWc === undefined) return
+
+  const classes = classesById(derived)
+  const sourceGeneration = classes.get(sourceWc.classId)?.generation ?? 2
+  const targetGeneration = classes.get(targetWc.classId)?.generation ?? 2
+  const stdOps = stdOpsById(derived)
+  const opLabel = (opId: OperationId): string => stdOps.get(opId)?.code ?? opId
+
+  const selected = selectedMaterials(derived, move.selector)
+  const scan = scanForMove(snap, move.toWorkCenterId)
+  const primaries = primaryRoutings(derived)
+
+  let synthesised = 0
+  const needsQualification = new Map<OperationId, number>()
+  const refused = new Map<OperationId, number>()
+  let partial = 0
+
+  for (const routing of primaries.values()) {
+    // The operation is leaving a machine at the SOURCE plant, so only versions
+    // there can be carrying it.
+    if (routing.plantId !== sourceWc.plantId) continue
+    if (selected !== null && !selected.has(routing.materialId)) continue
+
+    let touches = false
+    for (const op of routing.operations) {
+      if (op.workCenterId === move.fromWorkCenterId) {
+        touches = true
+        break
+      }
+    }
+    if (!touches) continue
+
+    // The target's plant is the pair `sourcing.ts` looks the variant up under.
+    const targetPair = key(routing.materialId, targetWc.plantId)
+    if (scan.pairsAtTarget.has(targetPair)) continue
+
+    const operations: RoutingOperation[] = []
+    let moved = 0
+    let left = 0
+    for (const op of routing.operations) {
+      if (op.workCenterId !== move.fromWorkCenterId) {
+        operations.push(op)
+        continue
+      }
+      const basis = basisOf(op.opId)
+      if (!laneIsViable(basis)) {
+        refused.set(op.opId, (refused.get(op.opId) ?? 0) + 1)
+        operations.push(op)
+        left += 1
+        continue
+      }
+      if (basis === 'featureCapable' || basis === 'retrofitCovered') {
+        needsQualification.set(op.opId, (needsQualification.get(op.opId) ?? 0) + 1)
+      }
+      operations.push(retimeOperation(op, scan, move.toWorkCenterId, sourceGeneration, targetGeneration))
+      moved += 1
+    }
+    if (moved === 0) continue
+    if (left > 0) partial += 1
+
+    // Deterministic, and `~SC-` cannot collide with a generated production
+    // version key (`RTG-<code>-<plant>-0001`) or with an SAP one.
+    const id: RoutingId = `${routing.id}~SC-${move.toWorkCenterId}`
+    if (working.synthesisedRoutingIds.has(id)) continue
+    working.synthesisedRoutingIds.add(id)
+    routingsOf(working).push({
+      id,
+      materialId: routing.materialId,
+      plantId: targetWc.plantId,
+      version: `SC-${move.toWorkCenterId}`,
+      // NEVER primary: baseline sourcing must resolve exactly as it did before
+      // this scenario existed.
+      primary: false,
+      operations,
+      source: 'scenario',
+    })
+    synthesised += 1
+  }
+
+  if (synthesised > 0 && needsQualification.size > 0) {
+    const ops = [...needsQualification.keys()].map(opLabel).join(', ')
+    const materials = [...needsQualification.values()].reduce((a, b) => a + b, 0)
+    warn(
+      `resourceMove "${label}": ${move.toWorkCenterId} is NOT APPROVED for ${ops} — the volume is modelled there, but ${materials} lane(s) need QUALIFICATION on ${move.toWorkCenterId} before this plan is executable.`,
+    )
+  }
+  if (refused.size > 0) {
+    for (const [opId, count] of refused) {
+      const option = cheapestClosingRetrofit(derived, working, move.toWorkCenterId, opId)
+      const remedy =
+        option === null
+          ? `no retrofit on ${targetWc.classId} closes the feature gap`
+          : `add a retrofit move for ${option.name} (${money(option.capexUsd)}, ${num(option.leadTimeWeeks)} week lead time) on ${move.toWorkCenterId} to unlock it`
+      warn(
+        `resourceMove "${label}": ${move.toWorkCenterId} cannot run ${opLabel(opId)}; ${count} material(s) keep that operation on ${move.fromWorkCenterId} — ${remedy}.`,
+      )
+    }
+  }
+  if (partial > 0 && synthesised > 0) {
+    warn(
+      `resourceMove "${label}": ${partial} routing(s) moved only part of what runs on ${move.fromWorkCenterId}; the refused operations stayed where they are.`,
+    )
+  }
+}
+
+/** The features the target holds today, plus everything this scenario retrofits onto it. */
+function grantedFeatures(
+  working: Working,
+  wcId: WorkCenterId,
+  retrofitAdds: ReadonlyMap<WorkCenterId, Set<FeatureId>>,
+): Set<FeatureId> {
+  const wc = readWorkCenter(working, wcId)
+  const granted = new Set<FeatureId>(wc?.features ?? [])
+  for (const featureId of retrofitAdds.get(wcId) ?? []) granted.add(featureId)
+  return granted
+}
+
+/** Cheapest retrofit on the target's class that closes the whole gap, or null. */
+function cheapestClosingRetrofit(
+  derived: Derived,
+  working: Working,
+  wcId: WorkCenterId,
+  opId: OperationId,
+): RetrofitOption | null {
+  const stdOp = stdOpsById(derived).get(opId)
+  if (stdOp === undefined) return null
+  const wc = readWorkCenter(working, wcId)
+  if (wc === undefined) return null
+  const granted = new Set(wc.features)
+  const missing = stdOp.requiredFeatures.filter((featureId) => !granted.has(featureId))
+  if (missing.length === 0) return null
+  const machineClass = classesById(derived).get(wc.classId)
+  if (machineClass === undefined) return null
+  let best: RetrofitOption | null = null
+  for (const option of machineClass.retrofits) {
+    const adds = new Set(option.addsFeatures)
+    if (!missing.every((featureId) => adds.has(featureId))) continue
+    if (
+      best === null ||
+      option.capexUsd < best.capexUsd ||
+      (option.capexUsd === best.capexUsd && option.leadTimeWeeks < best.leadTimeWeeks)
+    ) {
+      best = option
+    }
+  }
+  return best
+}
+
+// ---------------------------------------------------------------------------
 // applyMoves
 // ---------------------------------------------------------------------------
 
@@ -463,8 +870,24 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
   const scenarioGlides: Array<{ path: OeeGlidePath; label: string }> = []
   /** Enabled retrofit moves by target work center — resourceMove validation reads this. */
   const retrofitTargets = new Set<WorkCenterId>()
+  /**
+   * Features those retrofits would add, by work center — read whatever the
+   * `seq` order is. A drag that pairs a retrofit with a move must model the
+   * same lane whichever of the two the planner happens to have logged first.
+   */
+  const retrofitAdds = new Map<WorkCenterId, Set<FeatureId>>()
   for (const entry of ordered) {
-    if (entry.enabled && entry.move.kind === 'retrofit') retrofitTargets.add(entry.move.workCenterId)
+    if (!entry.enabled || entry.move.kind !== 'retrofit') continue
+    const { workCenterId, retrofitId } = entry.move
+    retrofitTargets.add(workCenterId)
+    const wc = snap.workCenters.find((candidate) => candidate.id === workCenterId)
+    const option = wc === undefined
+      ? undefined
+      : classesById(derived).get(wc.classId)?.retrofits.find((o) => o.id === retrofitId)
+    if (option === undefined) continue
+    const set = retrofitAdds.get(workCenterId)
+    if (set === undefined) retrofitAdds.set(workCenterId, new Set(option.addsFeatures))
+    else for (const featureId of option.addsFeatures) set.add(featureId)
   }
 
   for (const entry of ordered) {
@@ -486,14 +909,50 @@ export function applyMoves(snap: Snapshot, scenario: Scenario): AppliedMoves {
         const ops = approvedOps(derived)
         const sourceOps = ops.get(move.fromWorkCenterId) ?? new Set<OperationId>()
         const targetOps = ops.get(move.toWorkCenterId) ?? new Set<OperationId>()
+
+        // The capability model, per operation, decided ONCE for the move.
+        // `approved` is read off the base allow-list and short-circuits, so a
+        // version this move is about to synthesise can never be mistaken for
+        // an approval nobody granted.
+        const granted = grantedFeatures(working, move.toWorkCenterId, retrofitAdds)
+        const grantedToday = new Set(readWorkCenter(working, move.toWorkCenterId)?.features ?? [])
+        const basisCache = new Map<OperationId, LaneBasis>()
+        const basisOf = (opId: OperationId): LaneBasis => {
+          const cached = basisCache.get(opId)
+          if (cached !== undefined) return cached
+          const basis = ((): LaneBasis => {
+            if (targetOps.has(opId)) return 'approved'
+            const stdOp = stdOpsById(derived).get(opId)
+            // Unknown requirements: refuse to claim capability rather than
+            // assume none. Same rule as `capability.ts`.
+            if (stdOp === undefined) return 'none'
+            if (stdOp.requiredFeatures.every((f) => grantedToday.has(f))) return 'featureCapable'
+            if (stdOp.requiredFeatures.every((f) => granted.has(f))) return 'retrofitCovered'
+            return cheapestClosingRetrofit(derived, working, move.toWorkCenterId, opId) === null
+              ? 'none'
+              : 'retrofit'
+          })()
+          basisCache.set(opId, basis)
+          return basis
+        }
+
         let sharedApproved = 0
-        for (const opId of sourceOps) if (targetOps.has(opId)) sharedApproved += 1
-        if (sharedApproved === 0 && !retrofitTargets.has(move.toWorkCenterId)) {
+        let anyViable = false
+        for (const opId of sourceOps) {
+          if (targetOps.has(opId)) sharedApproved += 1
+          if (laneIsViable(basisOf(opId))) anyViable = true
+        }
+        if (sharedApproved === 0 && !anyViable && !retrofitTargets.has(move.toWorkCenterId)) {
           warn(
-            `resourceMove "${label}" disabled: ${move.toWorkCenterId} is not approved for any operation ${move.fromWorkCenterId} runs, and the scenario carries no retrofit for it. Add a retrofit move, or qualify the work center in master data.`,
+            `resourceMove "${label}" disabled: ${move.toWorkCenterId} is not approved for any operation ${move.fromWorkCenterId} runs, cannot run one on the features it has, and the scenario carries no retrofit for it. Add a retrofit move, or qualify the work center in master data.`,
           )
           disabled.add(entry.id)
+          break
         }
+        // The seam this file exists to close: `sourcing.ts` can only point a
+        // supply row at a routing that EXISTS, so mint the ones this drag
+        // implies. Refusals stay refusals — see `basisOf`.
+        synthesiseForResourceMove(working, derived, move, basisOf, label, warn)
         break
       }
 

@@ -156,6 +156,25 @@ async function readDragState(page) {
   })
 }
 
+/**
+ * The work-center register, keyed by code — every row carries that work
+ * center's mean and peak utilisation for the ACTIVE scenario, so this is the
+ * app's own reading of where the load sits.
+ */
+async function workCenterLoadRows(page) {
+  await page.goto(`${BASE}/#/workcenters`, { waitUntil: 'load' })
+  await page.waitForTimeout(4000)
+  return page.evaluate(() => {
+    const out = {}
+    for (const tr of Array.from(document.querySelectorAll('tbody tr'))) {
+      const t = (tr.innerText || '').replace(/\s+/g, ' ').trim()
+      const m = t.match(/[A-Z]{2}-[A-Z]{3}-WC\d{3}/)
+      if (m && !(m[0] in out)) out[m[0]] = t
+    }
+    return out
+  })
+}
+
 async function gotoRoute(page, hash, label) {
   await page.goto(`${BASE}/#${hash}`, { waitUntil: 'load' })
   await page.waitForTimeout(2200)
@@ -608,6 +627,13 @@ async function main() {
   // center's load onto one that can take it, with the move applying at once.
   // Driven with real pointer events, not a synthesised click.
   console.log('\nDRAG LOAD BETWEEN WORK CENTERS')
+  // Where the load sits BEFORE the drag, per work center. "A move object was
+  // recorded" is not the promise the product makes, and a page-wide numeric
+  // fingerprint is not proof either — forking a scenario changes numbers on
+  // the chrome all by itself. Only the source's and the target's own
+  // utilisation can say whether load actually relocated.
+  const loadBeforeDrag = await workCenterLoadRows(page)
+
   await page.goto(`${BASE}/#/network`, { waitUntil: 'load' })
   await page.waitForTimeout(3000)
 
@@ -650,10 +676,21 @@ async function main() {
       const m = t.match(/(\d+)\s+moves?\s+on/i)
       return m ? Number(m[1]) : 0
     })
-    const src = nodeBoxes[0]
-    const dst = nodeBoxes[nodeBoxes.length - 1]
+    // Drag the way the product tells the planner to: off the most saturated
+    // node on screen, onto the one with the most room. Grabbing an arbitrary
+    // node can pick one carrying no load at all, and "nothing moved because
+    // there was nothing to move" would prove nothing either way.
+    const meanUtil = (code) => {
+      const row = loadBeforeDrag[code]
+      const m = row ? row.match(/(\d+)%\s+(\d+)%/) : null
+      return m ? Number(m[1]) : -1
+    }
+    const byLoad = [...nodeBoxes].sort((a, b) => meanUtil(b.code) - meanUtil(a.code))
+    const src = byLoad[0]
+    const dst = byLoad[byLoad.length - 1]
+    const bystander = byLoad.find((n) => n.code !== src.code && n.code !== dst.code) ?? nodeBoxes[1]
     /** Where a node that is neither end of the drag sits, to catch a stray pan. */
-    const anchorBefore = await nodeAnchor(page, nodeBoxes[1].code)
+    const anchorBefore = await nodeAnchor(page, bystander.code)
     await page.mouse.move(src.x, src.y)
     await page.mouse.down()
     // Move in steps so pointermove handlers see a genuine gesture.
@@ -665,7 +702,7 @@ async function main() {
       await page.waitForTimeout(30)
     }
     const inFlight = await readDragState(page)
-    const anchorDuring = await nodeAnchor(page, nodeBoxes[1].code)
+    const anchorDuring = await nodeAnchor(page, bystander.code)
     await shot(page, 'drag-in-flight')
     await page.mouse.up()
     await page.waitForTimeout(3500)
@@ -682,8 +719,8 @@ async function main() {
       'The stage does not pan while dragging a node',
       !bystanderDrifted,
       anchorBefore === null || anchorDuring === null
-        ? `${nodeBoxes[1].code} left the viewport mid-drag`
-        : `bystander ${nodeBoxes[1].code} moved ${Math.round(anchorDuring.x - anchorBefore.x)},${Math.round(anchorDuring.y - anchorBefore.y)}px`,
+        ? `${bystander.code} left the viewport mid-drag`
+        : `bystander ${bystander.code} moved ${Math.round(anchorDuring.x - anchorBefore.x)},${Math.round(anchorDuring.y - anchorBefore.y)}px`,
     )
     record(
       'A ghost shows what is being moved while dragging',
@@ -705,6 +742,24 @@ async function main() {
       after.moves > movesBefore,
       `moves ${movesBefore} -> ${after.moves}, dragged ${src.code} -> ${dst.code}`,
     )
+
+    // ...and the move must DO something. Recording a move object while the
+    // model produced byte-identical load is the exact failure this check let
+    // through for the whole time `resourceMove` was inert: no routing version
+    // ran at the target work center, so every material was skipped, and
+    // utilisation, overloaded weeks and capex all came back identical to
+    // baseline while the scenario cheerfully reported "1 move".
+    const loadAfterDrag = await workCenterLoadRows(page)
+    const sourceRowChanged =
+      loadBeforeDrag[src.code] !== undefined && loadAfterDrag[src.code] !== loadBeforeDrag[src.code]
+    const targetRowChanged =
+      loadBeforeDrag[dst.code] !== undefined && loadAfterDrag[dst.code] !== loadBeforeDrag[dst.code]
+    record(
+      'The drag actually relocates load, not just a move object',
+      after.moves > movesBefore && (sourceRowChanged || targetRowChanged),
+      `${src.code} ${loadBeforeDrag[src.code] ?? '?'} -> ${loadAfterDrag[src.code] ?? '?'} | ${dst.code} ${loadBeforeDrag[dst.code] ?? '?'} -> ${loadAfterDrag[dst.code] ?? '?'}`,
+    )
+    await shot(page, 'drag-load-register')
   }
 
   // ------------------------------------------------------- the OEE glide knob
