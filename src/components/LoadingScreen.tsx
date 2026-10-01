@@ -90,7 +90,7 @@ export function LoadingScreen({
           <span className={styles.mark} aria-hidden="true" />
           <div>
             <p className={styles.name}>Capacity Cockpit</p>
-            <p className={styles.tagline}>Five plants · four continents · 18 months of weekly buckets</p>
+            <p className={styles.tagline}>Five plants · three continents · 18 months of weekly buckets</p>
           </div>
         </div>
 

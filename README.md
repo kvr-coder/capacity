@@ -2,12 +2,15 @@
 
 **A tool for answering one question: can our factories actually make what we've promised — and if not, where does it break, and what can we do about it?**
 
-Five plants on four continents. 15,000 products. 150 machines. Eighteen months of weekly
+Five plants on three continents. 15,000 products. 150 machines. Eighteen months of weekly
 plan. This shows you where the network runs out of hours, and lets you try fixes and see
 what they'd do — without touching the real plan.
 
 Everything runs in your browser. No server, no database, no account, no data leaves your
 machine.
+
+> **New to this project?** There is a short, scroll-through presentation at
+> [`/deck/`](https://kvr-coder.github.io/capacity/deck/) that places it alongside two related tools.
 
 > Everything below is also in the app itself — click the **?** in the top-right corner
 > (Help & guide) for the same walkthrough and glossary without leaving the screen you're on.

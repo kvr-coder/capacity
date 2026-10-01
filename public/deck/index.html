@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>See · Capture · Decide — three operations tools</title>
+<meta name="description" content="A short walkthrough of three operations tools: a performance board, a warehouse capture app and a factory capacity model." />
+<meta name="robots" content="noindex" />
+<style>
+  :root {
+    --paper: #f5f2ea;
+    --paper-2: #ece8dc;
+    --ink: #151821;
+    --muted: #5b6070;
+    --line: #ded9ca;
+    --night: #0f1420;
+    --night-2: #182033;
+    --see: #0f766e;
+    --capture: #b45309;
+    --decide: #2563eb;
+    --radius: 14px;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-snap-type: y proximity; scroll-behavior: smooth; }
+  body { margin: 0; font-family: var(--font); color: var(--ink); background: var(--paper); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  img { max-width: 100%; display: block; }
+  a { color: inherit; }
+
+  /* ---- slide frame ---- */
+  .slide {
+    min-height: 100vh; min-height: 100svh;
+    scroll-snap-align: start;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: clamp(56px, 9vh, 104px) clamp(20px, 6vw, 96px);
+    position: relative;
+  }
+  .slide > .inner { width: 100%; max-width: 1180px; margin: 0 auto; }
+  .dark { background: var(--night); color: #f2efe6; }
+  .dark .muted { color: #a4abbd; }
+  .alt { background: var(--paper-2); }
+
+  .kicker { font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; margin: 0 0 18px; color: var(--accent, var(--muted)); }
+  h1, h2, h3 { margin: 0; letter-spacing: -0.02em; line-height: 1.08; }
+  h1 { font-size: clamp(40px, 7.4vw, 92px); font-weight: 750; }
+  h2 { font-size: clamp(26px, 3.7vw, 46px); font-weight: 720; max-width: 22ch; }
+  h2.wide { max-width: 32ch; }
+  h3 { font-size: 19px; font-weight: 680; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  .lede { font-size: clamp(17px, 1.7vw, 22px); color: var(--muted); max-width: 56ch; margin-top: 22px; }
+  .dark .lede { color: #b8bfd0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 14px; }
+
+  .see { --accent: var(--see); }
+  .capture { --accent: var(--capture); }
+  .decide { --accent: var(--decide); }
+
+  /* ---- cover ---- */
+  .cover h1 .w1 { color: #5eead4; }
+  .cover h1 .w2 { color: #fbbf24; }
+  .cover h1 .w3 { color: #93c5fd; }
+  .cue { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); font: 500 12px var(--mono); letter-spacing: .12em; color: #8b93a8; text-transform: uppercase; text-decoration: none; }
+  .cue::after { content: ""; display: block; width: 1px; height: 28px; background: #8b93a8; margin: 10px auto 0; }
+
+  /* ---- grids ---- */
+  .cols { display: grid; gap: clamp(16px, 2.4vw, 32px); margin-top: clamp(28px, 5vh, 56px); }
+  .c3 { grid-template-columns: repeat(3, 1fr); }
+  .c2 { grid-template-columns: repeat(2, 1fr); }
+  .c4 { grid-template-columns: repeat(4, 1fr); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+  .dark .card { background: var(--night-2); border-color: #26304a; }
+  .card .num { font: 600 12px var(--mono); letter-spacing: .12em; color: var(--accent, var(--muted)); text-transform: uppercase; margin-bottom: 14px; }
+  .card h3 { margin-bottom: 8px; }
+  .card p { color: var(--muted); font-size: 15.5px; }
+  .dark .card p { color: #aab2c6; }
+  .card.top { border-top: 4px solid var(--accent, var(--line)); }
+
+  /* ---- stats ---- */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin-top: clamp(28px, 5vh, 48px); border-top: 1px solid var(--line); }
+  .stat { padding: 20px 20px 4px 0; }
+  .stat b { display: block; font-size: clamp(30px, 4vw, 48px); letter-spacing: -0.03em; font-weight: 720; color: var(--accent, var(--ink)); line-height: 1; }
+  .stat span { display: block; margin-top: 8px; font-size: 14px; color: var(--muted); max-width: 22ch; }
+
+  /* ---- problem -> approach -> outcome ---- */
+  .pao { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(16px, 2.4vw, 36px); margin-top: clamp(28px, 5vh, 52px); }
+  .pao > div { border-top: 3px solid var(--accent); padding-top: 16px; }
+  .pao h3 { font: 600 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+  .pao p, .pao li { font-size: 16.5px; color: var(--ink); }
+  .pao ul { margin: 0; padding-left: 1.1em; }
+  .pao li { margin-bottom: 8px; color: #2b2f3d; }
+
+  /* ---- screenshots ---- */
+  .shot { margin: 0; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: 0 1px 2px rgba(20,24,33,.05), 0 18px 40px -18px rgba(20,24,33,.28); cursor: zoom-in; }
+  .shot .chrome { display: flex; align-items: center; gap: 6px; padding: 9px 12px; background: #efece3; border-bottom: 1px solid var(--line); }
+  .shot .chrome i { width: 9px; height: 9px; border-radius: 50%; background: #cfc9b8; }
+  .shot .chrome span { margin-left: 8px; font: 500 11.5px var(--mono); color: #7b7f8c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shot img { width: 100%; height: auto; }
+  .shot.crop img { aspect-ratio: 16 / 9.6; object-fit: cover; object-position: top left; }
+  figcaption { padding: 14px 16px 16px; font-size: 14.5px; color: var(--muted); border-top: 1px solid var(--line); background: #fff; }
+  figcaption b { color: var(--ink); font-weight: 650; }
+  .shots { display: grid; gap: clamp(16px, 2.4vw, 28px); margin-top: clamp(24px, 4vh, 40px); align-items: start; }
+  .shots.two { grid-template-columns: repeat(2, 1fr); }
+
+  /* ---- hero screenshot + notes ---- */
+  .inner.xl { max-width: 1320px; }
+  .split { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: clamp(20px, 3vw, 40px); margin-top: clamp(24px, 4vh, 40px); align-items: start; }
+  .notice { margin: 0 0 20px; padding: 0; list-style: none; counter-reset: n; }
+  .notice li { counter-increment: n; position: relative; padding: 0 0 14px 38px; font-size: 16px; color: #2b2f3d; }
+  .notice li::before { content: counter(n); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font: 700 12px/24px var(--mono); text-align: center; }
+  .nh { font: 600 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+  .shot.mini.crop img { aspect-ratio: 16 / 7.4; }
+  .shot.mini figcaption { font-size: 13.5px; padding: 11px 14px 13px; }
+
+  /* ---- architecture flow ---- */
+  .flow { display: grid; grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr; align-items: stretch; margin-top: clamp(28px, 5vh, 52px); }
+  .node { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+  .node .tag { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--capture); margin-bottom: 8px; }
+  .node h3 { font-size: 17px; margin-bottom: 6px; }
+  .node p { font-size: 14.5px; color: var(--muted); }
+  .arrow { display: grid; place-items: center; color: var(--capture); font-size: 20px; }
+  .guard { margin-top: 18px; display: flex; gap: 12px; align-items: flex-start; background: #fff7ed; border: 1px solid #fed7aa; border-radius: var(--radius); padding: 14px 18px; font-size: 15.5px; }
+  .guard b { color: var(--capture); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 18px; }
+  .tile { border-left: 3px solid var(--capture); padding: 4px 0 4px 14px; }
+  .tile b { display: block; font-size: 16px; }
+  .tile span { font-size: 14.5px; color: var(--muted); }
+
+  /* ---- table ---- */
+  table { width: 100%; border-collapse: collapse; margin-top: clamp(24px, 4vh, 40px); font-size: 15.5px; }
+  th { text-align: left; font: 600 11.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: #8b93a8; padding: 0 16px 12px 0; border-bottom: 1px solid #2a344f; }
+  td { padding: 18px 16px 18px 0; border-bottom: 1px solid #222c45; vertical-align: top; color: #d9deea; }
+  td:first-child { font-weight: 650; color: #fff; white-space: nowrap; }
+  .pill { display: inline-block; font: 600 11.5px var(--mono); letter-spacing: .06em; padding: 4px 9px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.s { color: #5eead4; } .pill.c { color: #fbbf24; } .pill.d { color: #93c5fd; }
+
+  .links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 620; font-size: 15px; padding: 11px 18px; border-radius: 99px; background: var(--accent, var(--ink)); color: #fff; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .dark .btn.ghost { color: #f2efe6; border-color: #35405d; }
+  .note { margin-top: 22px; font-size: 13.5px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 12px; max-width: 70ch; }
+  .dark .note { color: #8f98ad; border-color: #2a344f; }
+
+  /* ---- chrome: progress + dots ---- */
+  #bar { position: fixed; inset: 0 auto auto 0; height: 3px; width: 0; background: linear-gradient(90deg, var(--see), var(--capture), var(--decide)); z-index: 30; }
+  #dots { position: fixed; right: 18px; top: 50%; transform: translateY(-50%); z-index: 30; display: flex; flex-direction: column; gap: 10px; }
+  #dots a { width: 9px; height: 9px; border-radius: 50%; background: transparent; border: 1.5px solid #8b93a8; display: block; transition: transform .2s, background .2s; }
+  #dots a.on { background: #8b93a8; transform: scale(1.35); }
+  #dots a:focus-visible { outline: 2px solid var(--decide); outline-offset: 3px; }
+
+  /* ---- lightbox ---- */
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 92vh; }
+  dialog::backdrop { background: rgba(10,13,22,.82); }
+  dialog img { max-width: 96vw; max-height: 92vh; border-radius: 10px; cursor: zoom-out; }
+
+  /* ---- reveal (only when JS is on, and motion is welcome) ---- */
+  .js .rv { opacity: 0; transform: translateY(14px); transition: opacity .6s ease, transform .6s ease; }
+  .js .rv.in { opacity: 1; transform: none; }
+  .js .rv.d1 { transition-delay: .08s; } .js .rv.d2 { transition-delay: .16s; } .js .rv.d3 { transition-delay: .24s; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .js .rv { opacity: 1; transform: none; transition: none; }
+  }
+
+  /* ---- responsive ---- */
+  @media (max-width: 980px) {
+    .c3, .c4, .pao, .stats, .tiles { grid-template-columns: repeat(2, 1fr); }
+    .shots.two { grid-template-columns: 1fr; }
+    .split { grid-template-columns: 1fr; }
+    .flow { grid-template-columns: 1fr; gap: 6px; }
+    .arrow { transform: rotate(90deg); height: 22px; }
+  }
+  @media (max-width: 620px) {
+    .c2, .c3, .c4, .pao, .stats, .tiles { grid-template-columns: 1fr; }
+    #dots { display: none; }
+    td:first-child { white-space: normal; }
+    table, thead, tbody, tr, th, td { display: block; }
+    thead { display: none; }
+    tr { padding: 14px 0; border-bottom: 1px solid #222c45; }
+    td { border: 0; padding: 4px 0; }
+  }
+  @media print {
+    html { scroll-snap-type: none; }
+    .slide { min-height: 0; break-after: page; padding: 32px; }
+    #bar, #dots, #hint, .cue { display: none; }
+    .js .rv { opacity: 1; transform: none; }
+  }
+</style>
+<script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+<div id="bar" aria-hidden="true"></div>
+<nav id="dots" aria-label="Slides"></nav>
+
+<!-- 00 · COVER -->
+<section class="slide dark cover" data-label="Cover">
+  <div class="inner">
+    <p class="kicker rv" style="color:#8b93a8">Operations portfolio · October 2026</p>
+    <h1 class="rv d1"><span class="w1">See it.</span><br /><span class="w2">Capture it.</span><br /><span class="w3">Decide it.</span></h1>
+    <p class="lede rv d2">Three operations tools, each built end to end: a performance board for the plant, a scanning app for the warehouse floor, and a what-if model for factory capacity.</p>
+  </div>
+  <a class="cue" href="#thread">Scroll</a>
+</section>
+
+<!-- 01 · THE THREAD -->
+<section class="slide" id="thread" data-label="The thread">
+  <div class="inner">
+    <p class="kicker rv">The thread</p>
+    <h2 class="rv d1 wide">Visibility needs trustworthy data. Data needs a way to act on it.</h2>
+    <div class="cols c3">
+      <div class="card top see rv d1">
+        <div class="num">01 · See</div>
+        <h3>VPM Dashboard</h3>
+        <p>One board for how the plant is performing against target, with a clear path for escalating problems up and passing decisions down.</p>
+      </div>
+      <div class="card top capture rv d2">
+        <div class="num">02 · Capture</div>
+        <h3>Warehouse capture app</h3>
+        <p>Stop re-typing pallet data. Scan at the pallet, confirm once, and keep the records the business already relies on accurate.</p>
+      </div>
+      <div class="card top decide rv d3">
+        <div class="num">03 · Decide</div>
+        <h3>Capacity Cockpit</h3>
+        <p>Find where five factories run out of hours, work out whether the fix is machines or people, and test it before spending anything.</p>
+      </div>
+    </div>
+    <p class="note rv">Data honesty: every number and screenshot in this deck comes from synthetic or generated data. Nothing here is real plant, company or inventory data.</p>
+  </div>
+</section>
+
+<!-- 02 · SEE: STORY -->
+<section class="slide alt see" data-label="See · story">
+  <div class="inner">
+    <p class="kicker rv">01 · See &nbsp;·&nbsp; VPM Dashboard</p>
+    <h2 class="rv d1 wide">Where is the plant today, and who owns the gap?</h2>
+    <div class="pao">
+      <div class="rv d1">
+        <h3>The problem</h3>
+        <ul>
+          <li>Performance numbers live in separate spreadsheets and get compiled for meetings.</li>
+          <li>When a KPI misses, escalation is informal: it depends on who happens to hear.</li>
+          <li>Actions get agreed, then lost.</li>
+        </ul>
+      </div>
+      <div class="rv d2">
+        <h3>The approach</h3>
+        <ul>
+          <li>One board per topic (13 of them: safety, quality, production, supply chain, cost and more), each KPI shown against its target.</li>
+          <li>Four tiers, T1 to T4. Issues escalate up; cascade messages flow back down.</li>
+          <li>Actions with owners, due dates and status, in the same place.</li>
+        </ul>
+      </div>
+      <div class="rv d3">
+        <h3>What it is today</h3>
+        <ul>
+          <li>A working browser prototype with no server and no build step.</li>
+          <li>Layouts are editable, and day-by-day snapshots can be saved.</li>
+          <li>A public version runs on fully synthetic data.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="links rv">
+      <a class="btn" href="https://kvr-coder.github.io/vpm-dashboard-demo/" target="_blank" rel="noopener">Open the live demo ↗</a>
+    </div>
+  </div>
+</section>
+
+<!-- 03 · SEE: SCREENS -->
+<section class="slide see" data-label="See · screens">
+  <div class="inner xl">
+    <p class="kicker rv">01 · See &nbsp;·&nbsp; What it looks like</p>
+    <h2 class="rv d1 wide">Status against target at a glance, with escalation in the same view.</h2>
+    <div class="split">
+      <figure class="shot crop rv d1" data-zoom>
+        <div class="chrome"><i></i><i></i><i></i><span>kvr-coder.github.io/vpm-dashboard-demo</span></div>
+        <img src="img/vpm-overview.jpg" alt="VPM overview board with escalation messages, cascade messages and a daily production chart" loading="lazy" />
+        <figcaption><b>Overview board.</b> Click to enlarge. Names, events and values are synthetic.</figcaption>
+      </figure>
+      <div class="rv d2">
+        <h3 class="nh">What to notice</h3>
+        <ul class="notice">
+          <li><b>Escalate up, cascade down.</b> Escalation messages (left) and cascade messages (right) are tagged by tier, T1 to T4.</li>
+          <li><b>One board, four viewpoints.</b> The tier switcher in the header re-cuts the same data from shop floor to plant.</li>
+          <li><b>Targets built in.</b> Charts carry a target line and a status banner, as on the Safety board below.</li>
+        </ul>
+        <figure class="shot mini crop" data-zoom>
+          <div class="chrome"><i></i><i></i><i></i><span>Safety board</span></div>
+          <img src="img/vpm-safety.jpg" alt="Safety board showing observations against a target line with a green status banner reading 2 of 3 OK" loading="lazy" />
+          <figcaption><b>Safety board.</b> Observations against target, banner reads “2/3 OK”.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 · CAPTURE: PROBLEM -->
+<section class="slide alt capture" data-label="Capture · story">
+  <div class="inner">
+    <p class="kicker rv">02 · Capture &nbsp;·&nbsp; Warehouse capture app</p>
+    <h2 class="rv d1 wide">A warehouse of about 3,000 pallets, run on re-typing.</h2>
+    <div class="pao">
+      <div class="rv d1">
+        <h3>The problem</h3>
+        <ul>
+          <li>Label data (pallet ID, part, lot, expiry) is typed by hand into a shared spreadsheet.</li>
+          <li>One mistyped storage location and a pallet is effectively lost among thousands of bins.</li>
+          <li>Materials near expiry are noticed late, and nobody can cheaply check that the floor matches the system.</li>
+        </ul>
+      </div>
+      <div class="rv d2">
+        <h3>The approach</h3>
+        <ul>
+          <li>Scan the barcode first (free and exact); read text from photos only as a fallback.</li>
+          <li>Nothing is guessed: every field goes through a confirm screen before it is saved.</li>
+          <li>Works offline on the warehouse floor and syncs when connected.</li>
+        </ul>
+      </div>
+      <div class="rv d3">
+        <h3>Where it stands</h3>
+        <ul>
+          <li>Specified in detail across ten milestones, with the database, sync agent and approval flow in the repository.</li>
+          <li>Final ERP hookup needs a one-time on-site setup before it can run.</li>
+          <li>No measured results yet, so none are claimed.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 · CAPTURE: HOW IT WORKS -->
+<section class="slide capture" data-label="Capture · design">
+  <div class="inner">
+    <p class="kicker rv">02 · Capture &nbsp;·&nbsp; How it is built</p>
+    <h2 class="rv d1 wide">Safe by design: the phone can never change the ERP.</h2>
+    <div class="flow rv d1" role="list">
+      <div class="node" role="listitem"><div class="tag">1 · Phone</div><h3>Scan, photograph, confirm</h3><p>Offline-first app on staff phones. Reads barcodes, keeps photos as evidence.</p></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node" role="listitem"><div class="tag">2 · Cloud</div><h3>Secure record store</h3><p>Pallet records, photos and an append-only audit trail, hosted in the EU.</p></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node" role="listitem"><div class="tag">3 · Warehouse PC</div><h3>Single-writer agent</h3><p>The only thing that writes to the master spreadsheet or talks to the ERP.</p></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node" role="listitem"><div class="tag">4 · Outputs</div><h3>Records, alerts, fixes</h3><p>Updated spreadsheet, expiry digests, and ERP corrections in approved batches.</p></div>
+    </div>
+    <div class="guard rv"><b>Guardrails.</b>&nbsp;No ERP writes from the phone, ever. No automatic ERP changes: a person approves each batch. The agent never overwrites a cell a human wrote.</div>
+    <div class="tiles rv">
+      <div class="tile"><b>Expiry warnings</b><span>Weekly digest of stock nearing expiry, ignoring lots already consumed.</span></div>
+      <div class="tile"><b>Bin spot-checks</b><span>Scan a bin and a pallet; the app answers match or mismatch against the latest ERP export.</span></div>
+      <div class="tile"><b>Human-gated fixes</b><span>A mismatch becomes a proposed correction that someone must approve.</span></div>
+      <div class="tile"><b>Accuracy you can measure</b><span>Every field a person corrects is logged, which is the quality metric.</span></div>
+    </div>
+    <p class="note rv">Illustrative diagram. App screens are not shown because this project is private and holds real warehouse workflow detail.</p>
+  </div>
+</section>
+
+<!-- 06 · DECIDE: STORY -->
+<section class="slide alt decide" data-label="Decide · story">
+  <div class="inner">
+    <p class="kicker rv">03 · Decide &nbsp;·&nbsp; Capacity Cockpit</p>
+    <h2 class="rv d1 wide">Can five factories make what we have promised? If not, what fixes it?</h2>
+    <div class="pao">
+      <div class="rv d1">
+        <h3>The problem</h3>
+        <ul>
+          <li>A machine has a fixed number of hours; a plan asks for units. Whether they fit is rarely visible.</li>
+          <li>“We are at 90%” hides which machine is at 140% while another sits idle.</li>
+          <li>Machines and people run out differently, and the fixes cost different things.</li>
+        </ul>
+      </div>
+      <div class="rv d2">
+        <h3>The approach</h3>
+        <ul>
+          <li>Model every product's route through the machines, with separate machine and operator hours.</li>
+          <li>Name the real constraint on each machine: buy equipment, or hire people.</li>
+          <li>Try any change as an undoable “move” against a read-only baseline.</li>
+        </ul>
+      </div>
+      <div class="rv d3">
+        <h3>What it is today</h3>
+        <ul>
+          <li>Working, tested and publicly hosted. It runs entirely in the browser.</li>
+          <li>Uses generated data shaped like a real SAP extract, with an import path for the real thing.</li>
+          <li>Open it and try it: nothing to install.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>5</b><span>plants across three continents</span></div>
+      <div class="stat"><b>15,000</b><span>products, each with its own routing</span></div>
+      <div class="stat"><b>150</b><span>machines, every one with two capacity pools</span></div>
+      <div class="stat"><b>&lt; 0.5 s</b><span>for a full what-if run, in the browser</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 07 · DECIDE: FIND IT -->
+<section class="slide decide" data-label="Decide · find it">
+  <div class="inner">
+    <p class="kicker rv">03 · Decide &nbsp;·&nbsp; Find it</p>
+    <h2 class="rv d1 wide">Every machine, every week, measured against its own limit.</h2>
+    <p class="lede rv d2">150 machines by 78 weeks. Blue is spare capacity, grey is at the limit, red is over it, and the hatch marks planned downtime. The pattern is the story: comfortable now, tight later.</p>
+    <div class="shots" style="margin-top:32px">
+      <figure class="shot crop rv d2" data-zoom>
+        <div class="chrome"><i></i><i></i><i></i><span>kvr-coder.github.io/capacity</span></div>
+        <img src="img/cap-grid.jpg" alt="Utilisation grid of 150 work centres across 78 weeks, shading from blue to red" loading="lazy" />
+        <figcaption><b>Where the network runs out.</b> Colour follows load against each machine's own ceiling, so a red cell means the same thing everywhere.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- 08 · DECIDE: FIX IT -->
+<section class="slide alt decide" data-label="Decide · fix it">
+  <div class="inner xl">
+    <p class="kicker rv">03 · Decide &nbsp;·&nbsp; Fix it</p>
+    <h2 class="rv d1 wide">Drill into a plant, find what could take the load, and test the move.</h2>
+    <div class="split">
+      <figure class="shot crop rv d1" data-zoom>
+        <div class="chrome"><i></i><i></i><i></i><span>kvr-coder.github.io/capacity · Network map</span></div>
+        <img src="img/cap-plant.jpg" alt="One plant's machines laid out by process stage, each with a utilisation ring" loading="lazy" />
+        <figcaption><b>One plant, by process stage.</b> Click to enlarge. Generated data.</figcaption>
+      </figure>
+      <div class="rv d2">
+        <h3 class="nh">What to notice</h3>
+        <ul class="notice">
+          <li><b>Machines in process order.</b> Moulding on the left through to packing on the right; each ring is that machine's load.</li>
+          <li><b>“L” means people, not equipment.</b> It marks machines whose limit is operators, so the fix is hiring rather than capex.</li>
+          <li><b>Somewhere else may take it.</b> The panel on the right lists machines in other plants that can run the same work. Drag load across; the move applies at once and can be undone.</li>
+        </ul>
+        <figure class="shot mini crop" data-zoom>
+          <div class="chrome"><i></i><i></i><i></i><span>Work centers · OEE</span></div>
+          <img src="img/cap-oee.jpg" alt="OEE ramp chart with controls for glide window, flat OEE override and run-rate override" loading="lazy" />
+          <figcaption><b>Two separate knobs.</b> Efficiency (OEE) ramps on a plan; run rate is set apart. Neither moves the other.</figcaption>
+        </figure>
+      </div>
+    </div>
+    <div class="links rv">
+      <a class="btn" href="../" target="_blank" rel="noopener">Open the live Capacity Cockpit ↗</a>
+      <a class="btn ghost" href="https://github.com/kvr-coder/capacity" target="_blank" rel="noopener">Source on GitHub ↗</a>
+    </div>
+    <p class="note rv">A real finding from building it: a plant-wide efficiency ramp first appeared to make things worse, because seeded master data silently outranked the planner's own scenario. It is fixed, and a test now fails if it ever returns.</p>
+  </div>
+</section>
+
+<!-- 09 · WHERE EACH STANDS -->
+<section class="slide dark" data-label="Where each stands">
+  <div class="inner">
+    <p class="kicker rv" style="color:#8b93a8">Where each one stands</p>
+    <h2 class="rv d1 wide">Three tools, three different levels of readiness.</h2>
+    <table class="rv d2">
+      <thead><tr><th>Tool</th><th>Status</th><th>Data today</th><th>Suggested next step</th></tr></thead>
+      <tbody>
+        <tr><td>VPM Dashboard</td><td><span class="pill s">Working prototype</span></td><td>Synthetic, public demo</td><td>Pilot one real plant board with a single tier team</td></tr>
+        <tr><td>Warehouse capture app</td><td><span class="pill c">Specified, partly built</span></td><td>None yet; private project</td><td>On-site pilot on one aisle, measuring field corrections</td></tr>
+        <tr><td>Capacity Cockpit</td><td><span class="pill d">Working, hosted</span></td><td>Generated, SAP-shaped</td><td>Load one real plant extract and compare with today's plan</td></tr>
+      </tbody>
+    </table>
+    <p class="note rv">Next steps are proposals for discussion, not commitments.</p>
+  </div>
+</section>
+
+<!-- 10 · CLOSE -->
+<section class="slide dark" data-label="Close">
+  <div class="inner">
+    <p class="kicker rv" style="color:#8b93a8">What connects them</p>
+    <h2 class="rv d1 wide">Small, honest tools that put a person in the loop.</h2>
+    <div class="cols c3">
+      <div class="card rv d1"><h3>Browser first</h3><p>No servers to run and nothing to install, so a pilot starts with a link rather than a project.</p></div>
+      <div class="card rv d2"><h3>People approve the changes</h3><p>Escalations are routed to people, ERP fixes wait for approval, and every scenario move can be undone.</p></div>
+      <div class="card rv d3"><h3>Honest about limits</h3><p>Each tool states what it does not do, and none claims results it has not measured.</p></div>
+    </div>
+    <div class="links rv">
+      <a class="btn" style="--accent:#2563eb" href="../" target="_blank" rel="noopener">Capacity Cockpit ↗</a>
+      <a class="btn ghost" href="https://kvr-coder.github.io/vpm-dashboard-demo/" target="_blank" rel="noopener">VPM demo ↗</a>
+      <a class="btn ghost" href="#top-of-deck" data-top>Back to the start ↑</a>
+    </div>
+  </div>
+</section>
+
+<dialog id="zoom"><img alt="" /></dialog>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var bar = document.getElementById('bar');
+  var dots = document.getElementById('dots');
+  var current = 0;
+
+  // dots
+  slides.forEach(function (s, i) {
+    var a = document.createElement('a');
+    a.href = '#';
+    a.title = s.getAttribute('data-label') || ('Slide ' + (i + 1));
+    a.setAttribute('aria-label', a.title);
+    a.addEventListener('click', function (e) { e.preventDefault(); go(i); });
+    dots.appendChild(a);
+  });
+
+  function go(i) {
+    i = Math.max(0, Math.min(slides.length - 1, i));
+    slides[i].scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  // which slide is current
+  function onScroll() {
+    var max = document.documentElement.scrollHeight - innerHeight;
+    bar.style.width = (max > 0 ? (scrollY / max) * 100 : 0) + '%';
+    var mid = scrollY + innerHeight / 2, idx = 0;
+    for (var i = 0; i < slides.length; i++) { if (slides[i].offsetTop <= mid) idx = i; }
+    if (idx !== current || !dots.querySelector('.on')) {
+      current = idx;
+      Array.prototype.forEach.call(dots.children, function (d, k) { d.classList.toggle('on', k === idx); });
+      var dark = slides[idx].classList.contains('dark');
+      Array.prototype.forEach.call(dots.children, function (d) { d.style.borderColor = dark ? '#8b93a8' : '#9aa0ae'; });
+    }
+  }
+  addEventListener('scroll', onScroll, { passive: true });
+  addEventListener('resize', onScroll);
+  onScroll();
+
+  // keyboard
+  addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var t = e.target && e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+    if (document.getElementById('zoom').open) return;
+    var k = e.key;
+    if (k === 'ArrowDown' || k === 'PageDown' || (k === ' ' && !e.shiftKey)) { e.preventDefault(); go(current + 1); }
+    else if (k === 'ArrowUp' || k === 'PageUp' || (k === ' ' && e.shiftKey)) { e.preventDefault(); go(current - 1); }
+    else if (k === 'Home') { e.preventDefault(); go(0); }
+    else if (k === 'End') { e.preventDefault(); go(slides.length - 1); }
+  });
+
+  // reveal on scroll
+  var rv = document.querySelectorAll('.rv');
+  if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { threshold: 0.12 });
+    rv.forEach(function (el) { io.observe(el); });
+  } else {
+    rv.forEach(function (el) { el.classList.add('in'); });
+  }
+
+  // back to start
+  document.querySelectorAll('[data-top]').forEach(function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); go(0); });
+  });
+
+  // lightbox
+  var dlg = document.getElementById('zoom'), big = dlg.querySelector('img');
+  document.querySelectorAll('[data-zoom]').forEach(function (f) {
+    f.addEventListener('click', function () {
+      var img = f.querySelector('img');
+      big.src = img.currentSrc || img.src; big.alt = img.alt;
+      if (dlg.showModal) dlg.showModal(); else window.open(big.src, '_blank');
+    });
+  });
+  dlg.addEventListener('click', function () { dlg.close(); });
+})();
+</script>
+</body>
+</html>

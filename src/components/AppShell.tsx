@@ -11,7 +11,7 @@
  * - **The runtime readout.** `ModelResult.runtimeMs` sits in the header because
  *   a performance regression that is merely felt gets argued about; one that is
  *   displayed gets fixed.
- * - **The plant clocks.** Five sites on four continents means "can we call
+ * - **The plant clocks.** Five sites on three continents means "can we call
  *   Suzhou about this?" is a real question, and answering it should not require
  *   arithmetic. `Intl.DateTimeFormat` over the five IANA zones, ticking once a
  *   minute.
