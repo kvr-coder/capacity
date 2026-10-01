@@ -1,0 +1,88 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.frame {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  touch-action: pan-y;
+}
+
+.svg:focus {
+  outline: none;
+}
+
+.svg:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The ramp window is context, not a series — a quiet plane, no hue. */
+.rampBand {
+  fill: var(--surface-sunken);
+}
+
+.rampLabel {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  fill: var(--text-muted);
+}
+
+.targetRule {
+  stroke: var(--axis);
+  stroke-width: 1;
+}
+
+.handle {
+  cursor: ns-resize;
+}
+
+.handle:focus {
+  outline: none;
+}
+
+.handle:focus-visible .handleMark {
+  stroke: var(--text-primary);
+  stroke-width: 2;
+}
+
+.hit {
+  fill: transparent;
+}
+
+.handleMark {
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+
+.handleLabel {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  /* The number stays ink-coloured; the handle beside it carries the hue. */
+  fill: var(--text-primary);
+}
+
+.legend {
+  padding-left: 56px;
+}
+
+.hint {
+  margin: 0;
+  padding-left: 56px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+}

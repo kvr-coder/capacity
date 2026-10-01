@@ -181,4 +181,192 @@ export interface FlowMatrixProps {
   destinations: Array<{ id: string; label: string }>
   flows: Array<{ originId: string; destinationId: string; units: number; costPerUnit: number }>
   format: (value: number) => string
+  onFlowClick?: (flow: { originId: string; destinationId: string }) => void
+  emptyMessage?: string
+}
+
+// ---------------------------------------------------------------------------
+// Shared chrome
+// ---------------------------------------------------------------------------
+
+/** Reserved status levels. Always rendered with an icon *and* a label. */
+export type ChartStatusLevel = 'good' | 'warning' | 'serious' | 'critical'
+
+export interface LegendProps {
+  series: SeriesMeta[]
+  /** Emphasised entry — the rest drop to a muted weight, never a new hue. */
+  activeId?: string | null
+  onHover?: (id: string | null) => void
+  /** Present makes entries buttons; absent leaves the legend inert. */
+  onToggle?: (id: string) => void
+  hiddenIds?: readonly string[]
+  align?: 'start' | 'end'
+  /** Trailing value beside each key — e.g. the last point, direct-labelled. */
+  valueFor?: (series: SeriesMeta) => string | undefined
+}
+
+export interface TooltipRow {
+  label: string
+  value: string
+  /** Coloured mark beside the label. The text itself stays ink-coloured. */
+  slot?: SeriesSlot
+  status?: ChartStatusLevel
+  /** Sets the row apart as a total or a conclusion. */
+  emphasis?: boolean
+}
+
+export interface TooltipProps {
+  title: string
+  subtitle?: string
+  rows: TooltipRow[]
+  /** Anchor in container-local pixels. The card flips to stay inside. */
+  x: number
+  y: number
+  containerWidth: number
+  containerHeight?: number
+  /** Extra content below the rows. React children only — never innerHTML. */
+  children?: ReactNode
+  /** Announced to screen readers when driven by keyboard focus. */
+  live?: boolean
+}
+
+export interface SparkBarProps {
+  values: number[]
+  slot?: SeriesSlot
+  width?: number
+  height?: number
+  /** Give the final bar the accent and drop the rest to the de-emphasis grey. */
+  accentLast?: boolean
+  /** Signed values render below a centred baseline. */
+  signed?: boolean
+  ariaLabel?: string
+}
+
+export interface HeroFigureProps {
+  label: string
+  /** The one big number on the screen. Proportional digits, generous space. */
+  value: string
+  unit?: string
+  caption?: string
+  delta?: StatTileProps['delta']
+  deltaContext?: string
+  status?: { level: ChartStatusLevel; label: string }
+  spark?: number[]
+  sparkSlot?: SeriesSlot
+  /** Optional limit rail below the figure. */
+  meter?: { ratio: number; valueLabel: string; limitLabel?: string }
+  /** Secondary figures set beside the hero, small. */
+  secondary?: Array<{ label: string; value: string }>
+}
+
+// ---------------------------------------------------------------------------
+// Utilisation grid — 150 work centers x 78 weeks, canvas fills + SVG chrome
+// ---------------------------------------------------------------------------
+
+export interface UtilisationGridRow {
+  /** Work center id. Stable — sorting permutes display order, never identity. */
+  id: string
+  code: string
+  name: string
+  plantId: string
+  plantLabel: string
+  /** The plant's permanent categorical slot. */
+  plantSlot: SeriesSlot
+  machineClass: string
+  /** Highest utilisation across the horizon — the default sort key. */
+  peakUtilisation: number
+}
+
+export type UtilisationSortKey = 'peak' | 'plant' | 'code'
+
+export interface UtilisationGridSort {
+  by: UtilisationSortKey
+  direction: 'asc' | 'desc'
+}
+
+export interface UtilisationCellRef {
+  /** Index into `rows` in DATA order, not display order. */
+  rowIndex: number
+  rowId: string
+  week: number
+}
+
+/**
+ * Everything sized work-center x week arrives as typed arrays indexed
+ * `rowIndex * weeks.length + week`. 150 x 78 is 11,700 cells per array; an
+ * array of objects at that size would cost more than the whole render budget.
+ *
+ * `utilisation` is measured against each cell's OWN ceiling, so 1 means "at the
+ * ceiling" everywhere and the diverging scale can be centred on 1 globally.
+ */
+export interface UtilisationGridProps {
+  rows: UtilisationGridRow[]
+  /** ISO week labels. Length is the column count. */
+  weeks: string[]
+  utilisation: Float64Array
+  machineUtilisation: Float64Array
+  labourUtilisation: Float64Array
+  availableHours: Float64Array
+  requiredHours: Float64Array
+  /** 0 = machine binds, 1 = labour binds. */
+  bindingPool: Uint8Array
+  downtimeHours: Float64Array
+  /** `key(rowId, week)` -> downtime event label, for the readout. */
+  eventLabels?: ReadonlyMap<string, string>
+  /** Half-width of the diverging domain around the ceiling. Default 0.5. */
+  domain?: number
+  sort?: UtilisationGridSort
+  onSortChange?: (sort: UtilisationGridSort) => void
+  selectedRowId?: string
+  onCellClick?: (cell: UtilisationCellRef) => void
+  onRowClick?: (rowId: string) => void
+  /** Viewport height in px; rows past it virtualise. Default 420. */
+  height?: number
+  cellWidth?: number
+  rowHeight?: number
+  weekLabel?: (week: string, index: number) => string
+  emptyMessage?: string
+}
+
+export interface UtilisationGridLegendProps {
+  /** Same domain the grid was given, so the scale and the fills agree. */
+  domain?: number
+  labels?: { negative: string; neutral: string; positive: string }
+}
+
+// ---------------------------------------------------------------------------
+// Glide curve — OEE over time, and an input rather than only a readout
+// ---------------------------------------------------------------------------
+
+export interface GlideRamp {
+  fromWeek: number
+  toWeek: number
+  label?: string
+}
+
+export interface GlideSeries extends SeriesMeta {
+  /** Resolved OEE 0..1, one value per entry in `weeks`. */
+  values: number[]
+  /** This series' own ramp window, if it differs from the chart's. */
+  ramp?: GlideRamp
+}
+
+export interface GlideCurveProps {
+  /** ISO week labels. Length is the x domain. */
+  weeks: string[]
+  /** One series, or a before/after pair — two makes the legend mandatory. */
+  series: GlideSeries[]
+  /** The shaded ramp window. Falls back to the last series' own ramp. */
+  ramp?: GlideRamp
+  height?: number
+  yMin?: number
+  yMax?: number
+  /** Target OEE at the end of the ramp. Present makes the handle draggable. */
+  endValue?: number
+  endValueBounds?: { min: number; max: number }
+  /** Pointer drag and arrow keys both call this; keyboard steps 0.01. */
+  onEndValueChange?: (value: number) => void
+  onWeekClick?: (week: number) => void
+  weekLabel?: (week: string, index: number) => string
+  emptyMessage?: string
 }

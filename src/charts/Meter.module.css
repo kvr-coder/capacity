@@ -1,0 +1,64 @@
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-sans);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.value {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.frame {
+  width: 100%;
+  min-width: 0;
+  /* Room for the limit tick, which overshoots the rail by 2px each way. */
+  padding: 2px 0;
+}
+
+.rail {
+  display: block;
+  overflow: visible;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 14px;
+}
+
+.limit {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.statusGlyph {
+  font-size: 9px;
+  line-height: 1;
+}

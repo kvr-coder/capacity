@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // Base path is overridable so the same build can serve from a GitHub Pages
@@ -11,6 +11,11 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
+  },
+  worker: {
+    // The engine worker is an ES module; without this Vite emits an IIFE that
+    // cannot use `import`, and the worker fails at runtime rather than at build.
+    format: 'es',
   },
   test: {
     globals: true,

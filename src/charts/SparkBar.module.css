@@ -1,0 +1,9 @@
+.spark {
+  display: block;
+  overflow: visible;
+}
+
+.empty {
+  display: inline-block;
+  border-bottom: 1px solid var(--gridline);
+}

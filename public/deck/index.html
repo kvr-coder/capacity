@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>See · Capture · Decide — three operations tools</title>
+<meta name="description" content="A short slide deck on three operations tools: a performance board, a warehouse capture app and a factory capacity model." />
+<meta name="robots" content="noindex" />
+<style>
+  :root {
+    --paper: #f5f2ea; --paper-2: #ece8dc; --ink: #151821; --muted: #5b6070; --line: #ded9ca;
+    --night: #0f1420; --night-2: #182033; --backdrop: #14161c;
+    --see: #0f766e; --capture: #b45309; --decide: #2563eb;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --s: 1;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-snap-type: y mandatory; scroll-behavior: smooth; background: var(--backdrop); }
+  body { margin: 0; font-family: var(--font); color: var(--ink); -webkit-font-smoothing: antialiased; line-height: 1.5; }
+  img { display: block; max-width: 100%; }
+  a { color: inherit; }
+  p, h1, h2, h3, ul { margin: 0; }
+
+  .slide { height: 100vh; height: 100svh; position: relative; overflow: hidden; scroll-snap-align: start; scroll-snap-stop: always; background: var(--backdrop); }
+  .stage {
+    position: absolute; left: 50%; top: 50%; width: 1280px; height: 720px; margin: -360px 0 0 -640px;
+    transform: scale(var(--s)); transform-origin: center center;
+    background: var(--paper); color: var(--ink); overflow: hidden;
+    padding: 58px 72px 62px; border-radius: 6px;
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.04);
+  }
+  .stage::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 6px; background: var(--accent, transparent); }
+  .dark .stage { background: var(--night); color: #f2efe6; }
+  .alt .stage { background: var(--paper-2); }
+  .foot { position: absolute; left: 72px; right: 72px; bottom: 20px; display: flex; justify-content: space-between; font: 500 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: #8b8f9c; }
+  .dark .foot { color: #6f7893; }
+
+  .see { --accent: var(--see); } .capture { --accent: var(--capture); } .decide { --accent: var(--decide); }
+
+  .kicker { font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; margin-bottom: 14px; color: var(--accent, var(--muted)); }
+  h1 { font-size: 92px; line-height: 1.02; letter-spacing: -.03em; font-weight: 760; }
+  h2 { font-size: 38px; line-height: 1.1; letter-spacing: -.02em; font-weight: 720; max-width: 25ch; }
+  h2.w { max-width: 31ch; }
+  h3 { font-size: 18px; font-weight: 680; letter-spacing: -.01em; }
+  .lede { font-size: 21px; color: #b8bfd0; max-width: 52ch; margin-top: 22px; }
+
+  .row { display: grid; gap: 24px; margin-top: 26px; }
+  .c3 { grid-template-columns: repeat(3, 1fr); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 22px; border-top: 4px solid var(--accent, var(--line)); }
+  .dark .card { background: var(--night-2); border-color: #26304a; border-top-color: #35405d; }
+  .card .num { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent, var(--muted)); margin-bottom: 12px; }
+  .card h3 { margin-bottom: 8px; } .card p { font-size: 15px; color: var(--muted); } .dark .card p { color: #aab2c6; }
+
+  .pao { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; margin-top: 28px; }
+  .pao > div { border-top: 3px solid var(--accent); padding-top: 14px; }
+  .pao h3 { font: 600 11.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+  .pao ul { padding-left: 1.05em; } .pao li { font-size: 15.5px; margin-bottom: 8px; color: #2b2f3d; line-height: 1.45; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 24px; border-top: 1px solid var(--line); }
+  .stat { padding: 16px 12px 0 0; } .stat b { display: block; font-size: 44px; line-height: 1; letter-spacing: -.03em; color: var(--accent); font-weight: 730; }
+  .stat span { display: block; margin-top: 8px; font-size: 13.5px; color: var(--muted); max-width: 22ch; }
+
+  .split { display: grid; grid-template-columns: 740px 1fr; gap: 34px; margin-top: 22px; align-items: start; }
+  .notice { list-style: none; padding: 0; counter-reset: n; margin-bottom: 14px; }
+  .notice li { counter-increment: n; position: relative; padding: 0 0 11px 34px; font-size: 14.5px; line-height: 1.42; color: #2b2f3d; }
+  .notice li::before { content: counter(n); position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font: 700 11px/22px var(--mono); text-align: center; }
+  .nh { font: 600 11.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+
+  .shot { margin: 0; background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; cursor: zoom-in; box-shadow: 0 14px 30px -14px rgba(20,24,33,.35); }
+  .shot .chrome { display: flex; align-items: center; gap: 5px; padding: 7px 10px; background: #efece3; border-bottom: 1px solid var(--line); }
+  .shot .chrome i { width: 8px; height: 8px; border-radius: 50%; background: #cfc9b8; }
+  .shot .chrome span { margin-left: 7px; font: 500 10.5px var(--mono); color: #7b7f8c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shot img { width: 100%; height: auto; }
+  .shot.crop img { object-fit: cover; object-position: top left; }
+  .shot.hero.crop img { height: 410px; }
+  .shot.mini.crop img { height: 128px; }
+  .shot.hero.crop.short img { height: 330px; }
+  figcaption { padding: 9px 12px 10px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); background: #fff; }
+  figcaption b { color: var(--ink); font-weight: 650; }
+
+  .flow { display: grid; grid-template-columns: 1fr 22px 1fr 22px 1fr 22px 1fr; margin-top: 24px; }
+  .node { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .node .tag { font: 600 10.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--capture); margin-bottom: 7px; }
+  .node h3 { font-size: 16px; margin-bottom: 5px; } .node p { font-size: 13.5px; color: var(--muted); line-height: 1.4; }
+  .arrow { display: grid; place-items: center; color: var(--capture); font-size: 18px; }
+  .guard { margin-top: 16px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px; padding: 12px 18px; font-size: 14.5px; }
+  .guard b { color: var(--capture); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 16px; }
+  .tile { border-left: 3px solid var(--capture); padding: 2px 0 2px 12px; } .tile b { display: block; font-size: 14.5px; } .tile span { font-size: 13px; color: var(--muted); line-height: 1.4; display: block; }
+
+  .compare { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  .big { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; border-top: 4px solid var(--decide); }
+  .big b { display: block; font-size: 40px; line-height: 1; letter-spacing: -.03em; color: var(--decide); font-weight: 730; }
+  .big span { display: block; margin-top: 8px; font-size: 13.5px; color: var(--muted); }
+  .lead { font-size: 17px; color: #2b2f3d; margin-top: 16px; max-width: 46ch; line-height: 1.5; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 26px; font-size: 15px; }
+  th { text-align: left; font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: #8b93a8; padding: 0 14px 11px 0; border-bottom: 1px solid #2a344f; }
+  td { padding: 17px 14px 17px 0; border-bottom: 1px solid #222c45; vertical-align: top; color: #d9deea; }
+  td:first-child { font-weight: 650; color: #fff; white-space: nowrap; }
+  .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: .05em; padding: 4px 9px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.s { color: #5eead4; } .pill.c { color: #fbbf24; } .pill.d { color: #93c5fd; }
+
+  .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  .btn { display: inline-flex; text-decoration: none; font-weight: 620; font-size: 14px; padding: 9px 16px; border-radius: 99px; background: var(--accent, var(--ink)); color: #fff; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); } .dark .btn.ghost { color: #f2efe6; border-color: #35405d; }
+  .note { margin-top: 16px; font-size: 12.5px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 11px; max-width: 78ch; } .dark .note { color: #8f98ad; border-color: #2a344f; }
+
+  .cover h1 .w1 { color: #5eead4; } .cover h1 .w2 { color: #fbbf24; } .cover h1 .w3 { color: #93c5fd; }
+  .cover .stage { padding-top: 120px; }
+
+  #bar { position: fixed; inset: 0 auto auto 0; height: 3px; width: 0; z-index: 30; background: linear-gradient(90deg, var(--see), var(--capture), var(--decide)); }
+  #dots { position: fixed; right: 14px; top: 50%; transform: translateY(-50%); z-index: 30; display: flex; flex-direction: column; gap: 9px; }
+  #dots a { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #6b7388; display: block; transition: transform .2s, background .2s; }
+  #dots a.on { background: #cbd1e0; border-color: #cbd1e0; transform: scale(1.35); }
+  #dots a:focus-visible { outline: 2px solid var(--decide); outline-offset: 3px; }
+  #keys { position: fixed; left: 14px; bottom: 10px; z-index: 30; font: 500 10.5px var(--mono); letter-spacing: .08em; color: #6b7388; }
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 92vh; }
+  dialog::backdrop { background: rgba(8,10,16,.88); }
+  dialog img { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-out; }
+
+  .js .rv { opacity: 0; transform: translateY(10px); transition: opacity .5s ease, transform .5s ease; }
+  .js .slide.in .rv { opacity: 1; transform: none; }
+  .js .slide.in .rv.d1 { transition-delay: .06s; } .js .slide.in .rv.d2 { transition-delay: .14s; } .js .slide.in .rv.d3 { transition-delay: .22s; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .js .rv { opacity: 1; transform: none; transition: none; } }
+
+  @media (max-width: 760px) {
+    html { scroll-snap-type: none; }
+    .slide { height: auto; min-height: 100svh; background: var(--paper); }
+    .slide.alt { background: var(--paper-2); } .slide.dark { background: var(--night); }
+    .stage { position: relative; left: auto; top: auto; width: auto; height: auto; margin: 0; transform: none; border-radius: 0; box-shadow: none; overflow: visible; padding: 56px 20px 64px; background: transparent !important; }
+    .foot { left: 20px; right: 20px; }
+    h1 { font-size: 48px; } h2 { font-size: 28px; max-width: none; } .lede { font-size: 17px; }
+    .row, .pao, .stats, .tiles, .compare, .split { grid-template-columns: 1fr; }
+    .flow { grid-template-columns: 1fr; gap: 6px; } .arrow { transform: rotate(90deg); height: 20px; }
+    .shot.hero.crop img, .shot.mini.crop img { height: auto; }
+    #dots, #keys { display: none; }
+    table, thead, tbody, tr, th, td { display: block; } thead { display: none; } tr { padding: 12px 0; border-bottom: 1px solid #222c45; } td { border: 0; padding: 3px 0; }
+    .cover .stage { padding-top: 90px; }
+  }
+  @media print {
+    @page { size: 1280px 720px; margin: 0; }
+    html { scroll-snap-type: none; background: #fff; }
+    .slide { height: 720px; break-after: page; }
+    .stage { transform: none; left: 0; top: 0; margin: 0; box-shadow: none; border-radius: 0; }
+    #bar, #dots, #keys { display: none; }
+    .js .rv { opacity: 1; transform: none; }
+  }
+</style>
+<script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+<div id="bar" aria-hidden="true"></div>
+<nav id="dots" aria-label="Slides"></nav>
+<div id="keys" aria-hidden="true">↑ ↓ navigate · F fullscreen</div>
+
+<section class="slide dark cover" data-label="Cover"><div class="stage">
+  <p class="kicker rv" style="color:#8b93a8">Operations portfolio · October 2026</p>
+  <h1 class="rv d1"><span class="w1">See it.</span><br /><span class="w2">Capture it.</span><br /><span class="w3">Decide it.</span></h1>
+  <p class="lede rv d2">Three operations tools, each built end to end: a performance board for the plant, a scanning app for the warehouse floor, and a what-if model for factory capacity.</p>
+</div></section>
+
+<section class="slide" data-label="The thread"><div class="stage">
+  <p class="kicker rv">The thread</p>
+  <h2 class="rv d1 w">Visibility needs trustworthy data. Data needs a way to act on it.</h2>
+  <div class="row c3" style="margin-top:34px">
+    <div class="card see rv d1"><div class="num">01 · See</div><h3>VPM Dashboard</h3><p>One board for how the plant is performing against target, with a clear path for escalating problems up and passing decisions down.</p></div>
+    <div class="card capture rv d2"><div class="num">02 · Capture</div><h3>Warehouse capture app</h3><p>Stop re-typing pallet data. Scan at the pallet, confirm once, and keep the records the business relies on accurate.</p></div>
+    <div class="card decide rv d3"><div class="num">03 · Decide</div><h3>Capacity Cockpit</h3><p>Find where five factories run out of hours, work out whether the fix is machines or people, and test it before spending anything.</p></div>
+  </div>
+  <p class="note rv">Data honesty: every number and screenshot in this deck comes from synthetic or generated data. Nothing here is real plant, company or inventory data.</p>
+  <div class="foot"><span>See · Capture · Decide</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide alt see" data-label="See · story"><div class="stage">
+  <p class="kicker rv">01 · See &nbsp;·&nbsp; VPM Dashboard</p>
+  <h2 class="rv d1 w">Where is the plant today, and who owns the gap?</h2>
+  <div class="pao">
+    <div class="rv d1"><h3>The problem</h3><ul>
+      <li>Performance numbers live in separate spreadsheets and get compiled for meetings.</li>
+      <li>When a KPI misses, escalation is informal: it depends on who happens to hear.</li>
+      <li>Actions get agreed, then lost.</li></ul></div>
+    <div class="rv d2"><h3>The approach</h3><ul>
+      <li>One board per topic (13 of them: safety, quality, production, supply chain, cost and more), each KPI shown against its target.</li>
+      <li>Four tiers, T1 to T4. Issues escalate up; cascade messages flow back down.</li>
+      <li>Actions with owners, due dates and status, in the same place.</li></ul></div>
+    <div class="rv d3"><h3>What it is today</h3><ul>
+      <li>A working browser prototype with no server and no build step.</li>
+      <li>Layouts are editable, and day-by-day snapshots can be saved.</li>
+      <li>A public version runs on fully synthetic data.</li></ul></div>
+  </div>
+  <div class="links rv"><a class="btn" href="https://kvr-coder.github.io/vpm-dashboard-demo/" target="_blank" rel="noopener">Open the live demo ↗</a></div>
+  <div class="foot"><span>01 · See</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide see" data-label="See · screens"><div class="stage">
+  <p class="kicker rv">01 · See &nbsp;·&nbsp; What it looks like</p>
+  <h2 class="rv d1 w">Status against target at a glance, with escalation in the same view.</h2>
+  <div class="split">
+    <figure class="shot hero crop rv d1" data-zoom>
+      <div class="chrome"><i></i><i></i><i></i><span>kvr-coder.github.io/vpm-dashboard-demo</span></div>
+      <img src="img/vpm-overview.jpg" alt="VPM overview board with escalation messages, cascade messages and a daily production chart" loading="lazy" />
+      <figcaption><b>Overview board.</b> Click to enlarge. All names and values are synthetic.</figcaption>
+    </figure>
+    <div class="rv d2">
+      <div class="nh">What to notice</div>
+      <ul class="notice">
+        <li><b>Escalate up, cascade down.</b> Messages are tagged by tier, T1 to T4.</li>
+        <li><b>One board, four viewpoints.</b> The tier switcher re-cuts the same data from shop floor to plant.</li>
+        <li><b>Targets built in.</b> Charts carry a target line and a status banner.</li>
+      </ul>
+      <figure class="shot mini crop" data-zoom>
+        <div class="chrome"><i></i><i></i><i></i><span>Safety board</span></div>
+        <img src="img/vpm-safety.jpg" alt="Safety board showing observations against a target line with a green status banner reading 2 of 3 OK" loading="lazy" />
+        <figcaption><b>Safety board.</b> Banner reads “2/3 OK”.</figcaption>
+      </figure>
+    </div>
+  </div>
+  <div class="foot"><span>01 · See</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide alt capture" data-label="Capture · story"><div class="stage">
+  <p class="kicker rv">02 · Capture &nbsp;·&nbsp; Warehouse capture app</p>
+  <h2 class="rv d1 w">A warehouse of about 3,000 pallets, run on re-typing.</h2>
+  <div class="pao">
+    <div class="rv d1"><h3>The problem</h3><ul>
+      <li>Label data (pallet ID, part, lot, expiry) is typed by hand into a shared spreadsheet.</li>
+      <li>One mistyped storage location and a pallet is effectively lost among thousands of bins.</li>
+      <li>Stock near expiry is noticed late, and nobody can cheaply check the floor matches the system.</li></ul></div>
+    <div class="rv d2"><h3>The approach</h3><ul>
+      <li>Scan the barcode first (free and exact); read text from photos only as a fallback.</li>
+      <li>Nothing is guessed: every field passes a confirm screen before it is saved.</li>
+      <li>Works offline on the warehouse floor and syncs when connected.</li></ul></div>
+    <div class="rv d3"><h3>Where it stands</h3><ul>
+      <li>Specified in detail across ten milestones, with the database, sync agent and approval flow in the repository.</li>
+      <li>Final ERP hookup needs a one-time on-site setup before it can run.</li>
+      <li>No measured results yet, so none are claimed.</li></ul></div>
+  </div>
+  <div class="foot"><span>02 · Capture</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide capture" data-label="Capture · design"><div class="stage">
+  <p class="kicker rv">02 · Capture &nbsp;·&nbsp; How it is built</p>
+  <h2 class="rv d1 w">Safe by design: the phone can never change the ERP.</h2>
+  <div class="flow rv d1">
+    <div class="node"><div class="tag">1 · Phone</div><h3>Scan, photograph, confirm</h3><p>Offline-first app on staff phones. Reads barcodes, keeps photos as evidence.</p></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="tag">2 · Cloud</div><h3>Secure record store</h3><p>Pallet records, photos and an append-only audit trail, hosted in the EU.</p></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="tag">3 · Warehouse PC</div><h3>Single-writer agent</h3><p>The only thing that writes to the master spreadsheet or talks to the ERP.</p></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="tag">4 · Outputs</div><h3>Records, alerts, fixes</h3><p>Updated spreadsheet, expiry digests, and ERP corrections in approved batches.</p></div>
+  </div>
+  <div class="guard rv"><b>Guardrails.</b> No ERP writes from the phone, ever. No automatic ERP changes: a person approves each batch. The agent never overwrites a cell a human wrote.</div>
+  <div class="tiles rv">
+    <div class="tile"><b>Expiry warnings</b><span>Weekly digest of stock nearing expiry, ignoring lots already consumed.</span></div>
+    <div class="tile"><b>Bin spot-checks</b><span>Scan a bin and a pallet; match or mismatch against the latest ERP export.</span></div>
+    <div class="tile"><b>Human-gated fixes</b><span>A mismatch becomes a proposed correction someone must approve.</span></div>
+    <div class="tile"><b>Measurable accuracy</b><span>Every field a person corrects is logged: that is the quality metric.</span></div>
+  </div>
+  <p class="note rv">Illustrative diagram. App screens are not shown because this project is private and holds real warehouse workflow detail.</p>
+  <div class="foot"><span>02 · Capture</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide alt decide" data-label="Decide · story"><div class="stage">
+  <p class="kicker rv">03 · Decide &nbsp;·&nbsp; Capacity Cockpit</p>
+  <h2 class="rv d1 w">Can five factories make what we have promised? If not, what fixes it?</h2>
+  <div class="pao" style="margin-top:22px">
+    <div class="rv d1"><h3>The problem</h3><ul>
+      <li>A machine has a fixed number of hours; a plan asks for units. Whether they fit is rarely visible.</li>
+      <li>“We are at 90%” hides which machine is at 140% while another sits idle.</li>
+      <li>Machines and people run out differently, and the fixes cost different things.</li></ul></div>
+    <div class="rv d2"><h3>The approach</h3><ul>
+      <li>Model every product's route through the machines, with separate machine and operator hours.</li>
+      <li>Name the real constraint on each machine: buy equipment, or hire people.</li>
+      <li>Try any change as an undoable “move” against a read-only baseline.</li></ul></div>
+    <div class="rv d3"><h3>What it is today</h3><ul>
+      <li>Working, tested and publicly hosted. Runs entirely in the browser.</li>
+      <li>Generated data shaped like a real SAP extract, with an import path for the real thing.</li>
+      <li>Open it and try it: nothing to install.</li></ul></div>
+  </div>
+  <div class="stats rv">
+    <div class="stat"><b>5</b><span>plants across three continents</span></div>
+    <div class="stat"><b>15,000</b><span>products, each with its own routing</span></div>
+    <div class="stat"><b>150</b><span>machines, each with two capacity pools</span></div>
+    <div class="stat"><b>&lt; 0.5 s</b><span>for a full what-if run, in the browser</span></div>
+  </div>
+  <div class="foot"><span>03 · Decide</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide decide" data-label="Decide · find it"><div class="stage">
+  <p class="kicker rv">03 · Decide &nbsp;·&nbsp; Find it</p>
+  <h2 class="rv d1 w">Every machine, every week, measured against its own limit.</h2>
+  <div class="split">
+    <figure class="shot hero crop rv d1" data-zoom>
+      <div class="chrome"><i></i><i></i><i></i><span>kvr-coder.github.io/capacity</span></div>
+      <img src="img/cap-grid.jpg" alt="Utilisation grid of 150 work centres across 78 weeks, shading from blue to red" loading="lazy" />
+      <figcaption><b>Where the network runs out.</b> 150 machines by 78 weeks. Click to enlarge. Generated data.</figcaption>
+    </figure>
+    <div class="rv d2">
+      <div class="nh">How to read it</div>
+      <ul class="notice">
+        <li><b>Colour is load against that machine's own ceiling.</b> Blue is spare, grey is at the limit, red is over it.</li>
+        <li><b>Hatching is planned downtime,</b> so a blocked week never looks idle.</li>
+        <li><b>The pattern is the story.</b> Comfortable now on the left, tight later on the right. Click any red cell for relief options.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>03 · Decide</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide alt decide" data-label="Decide · fix it"><div class="stage">
+  <p class="kicker rv">03 · Decide &nbsp;·&nbsp; Fix it</p>
+  <h2 class="rv d1 w">Drill into a plant, find what could take the load, and test the move.</h2>
+  <div class="split">
+    <figure class="shot hero crop short rv d1" data-zoom>
+      <div class="chrome"><i></i><i></i><i></i><span>kvr-coder.github.io/capacity · Network map</span></div>
+      <img src="img/cap-plant.jpg" alt="One plant's machines laid out by process stage, each with a utilisation ring" loading="lazy" />
+      <figcaption><b>One plant, by process stage.</b> Click to enlarge. Generated data.</figcaption>
+    </figure>
+    <div class="rv d2">
+      <div class="nh">What to notice</div>
+      <ul class="notice">
+        <li><b>Process order.</b> Moulding on the left through to packing on the right; each ring is that machine's load.</li>
+        <li><b>“L” means people, not equipment,</b> so the fix is hiring rather than capex.</li>
+        <li><b>Drag load to a machine that can take it.</b> The move applies at once and can be undone.</li>
+      </ul>
+      <figure class="shot mini crop" data-zoom>
+        <div class="chrome"><i></i><i></i><i></i><span>Work centers · OEE</span></div>
+        <img src="img/cap-oee.jpg" alt="OEE ramp chart with controls for glide window, flat OEE override and run-rate override" loading="lazy" />
+        <figcaption><b>Two separate knobs:</b> efficiency ramp and run rate.</figcaption>
+      </figure>
+    </div>
+  </div>
+  <div class="links rv" style="margin-top:14px"><a class="btn" href="../" target="_blank" rel="noopener">Open the live Capacity Cockpit ↗</a><a class="btn ghost" href="https://github.com/kvr-coder/capacity" target="_blank" rel="noopener">Source on GitHub ↗</a></div>
+  <div class="foot"><span>03 · Decide</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide decide" data-label="A real finding"><div class="stage">
+  <p class="kicker rv">03 · Decide &nbsp;·&nbsp; A real finding</p>
+  <h2 class="rv d1 w">A plant-wide efficiency ramp first made things worse.</h2>
+  <div class="split" style="grid-template-columns: 1fr 1fr; margin-top:26px">
+    <div class="rv d1">
+      <p class="lead" style="margin-top:0"><b>What happened.</b> Ramping one plant's efficiency (OEE) to 98% raised utilisation and shortfall instead of lowering them.</p>
+      <p class="lead"><b>Why.</b> Seeded master data quietly outranked the planner's own scenario for 72 of 78 weeks, and the editor suggested a fixed 70% starting point.</p>
+      <p class="lead"><b>The fix.</b> A scenario move now always outranks background data, the start value is read from the real machine, and a deliberate decline is still allowed but labelled as one.</p>
+    </div>
+    <div class="rv d2">
+      <div class="nh">After the fix, same ramp to 98%</div>
+      <div class="compare">
+        <div class="big"><b>28 / 28</b><span>machines reach the target (was 0)</span></div>
+        <div class="big"><b>−15.8%</b><span>shortfall units</span></div>
+        <div class="big"><b>307 → 270</b><span>overloaded machine-weeks</span></div>
+        <div class="big"><b>80.0 → 78.5%</b><span>network utilisation</span></div>
+      </div>
+      <p class="note">A test now fails if the problem ever returns.</p>
+    </div>
+  </div>
+  <div class="foot"><span>03 · Decide</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide dark" data-label="Where each stands"><div class="stage">
+  <p class="kicker rv" style="color:#8b93a8">Where each one stands</p>
+  <h2 class="rv d1 w">Three tools, three different levels of readiness.</h2>
+  <table class="rv d2">
+    <thead><tr><th>Tool</th><th>Status</th><th>Data today</th><th>Suggested next step</th></tr></thead>
+    <tbody>
+      <tr><td>VPM Dashboard</td><td><span class="pill s">Working prototype</span></td><td>Synthetic, public demo</td><td>Pilot one real plant board with a single tier team</td></tr>
+      <tr><td>Warehouse capture app</td><td><span class="pill c">Specified, partly built</span></td><td>None yet; private project</td><td>On-site pilot on one aisle, measuring field corrections</td></tr>
+      <tr><td>Capacity Cockpit</td><td><span class="pill d">Working, hosted</span></td><td>Generated, SAP-shaped</td><td>Load one real plant extract and compare with today's plan</td></tr>
+    </tbody>
+  </table>
+  <p class="note rv">Next steps are proposals for discussion, not commitments.</p>
+  <div class="foot"><span>Summary</span><span class="pg"></span></div>
+</div></section>
+
+<section class="slide dark" data-label="Close"><div class="stage">
+  <p class="kicker rv" style="color:#8b93a8">What connects them</p>
+  <h2 class="rv d1 w">Small, honest tools that put a person in the loop.</h2>
+  <div class="row c3" style="margin-top:34px">
+    <div class="card rv d1"><h3>Browser first</h3><p>No servers to run and nothing to install, so a pilot starts with a link rather than a project.</p></div>
+    <div class="card rv d2"><h3>People approve the changes</h3><p>Escalations are routed to people, ERP fixes wait for approval, and every scenario move can be undone.</p></div>
+    <div class="card rv d3"><h3>Honest about limits</h3><p>Each tool states what it does not do, and none claims results it has not measured.</p></div>
+  </div>
+  <div class="links rv">
+    <a class="btn" style="--accent:#2563eb" href="../" target="_blank" rel="noopener">Capacity Cockpit ↗</a>
+    <a class="btn ghost" href="https://kvr-coder.github.io/vpm-dashboard-demo/" target="_blank" rel="noopener">VPM demo ↗</a>
+    <a class="btn ghost" href="#" data-top>Back to the start ↑</a>
+  </div>
+  <div class="foot"><span>See · Capture · Decide</span><span class="pg"></span></div>
+</div></section>
+
+<dialog id="zoom"><img alt="" /></dialog>
+
+<script>
+(function () {
+  var W = 1280, H = 720;
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var root = document.documentElement, bar = document.getElementById('bar'), dots = document.getElementById('dots');
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches, current = 0;
+
+  function fit() {
+    var s = Math.min(innerWidth / W, innerHeight / H) * 0.96;
+    root.style.setProperty('--s', s.toFixed(4));
+  }
+  fit(); addEventListener('resize', function () { fit(); onScroll(); });
+
+  slides.forEach(function (s, i) {
+    var pg = s.querySelector('.pg'); if (pg) pg.textContent = (i + 1) + ' / ' + slides.length;
+    var a = document.createElement('a'); a.href = '#'; a.title = s.getAttribute('data-label') || ('Slide ' + (i + 1));
+    a.setAttribute('aria-label', a.title);
+    a.addEventListener('click', function (e) { e.preventDefault(); go(i); });
+    dots.appendChild(a);
+  });
+
+  function go(i) {
+    i = Math.max(0, Math.min(slides.length - 1, i));
+    slides[i].scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  function onScroll() {
+    var max = root.scrollHeight - innerHeight;
+    bar.style.width = (max > 0 ? (scrollY / max) * 100 : 0) + '%';
+    var mid = scrollY + innerHeight / 2, idx = 0;
+    for (var i = 0; i < slides.length; i++) if (slides[i].offsetTop <= mid) idx = i;
+    current = idx;
+    Array.prototype.forEach.call(dots.children, function (d, k) { d.classList.toggle('on', k === idx); });
+  }
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+  addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (document.getElementById('zoom').open) return;
+    var k = e.key;
+    if (k === 'ArrowDown' || k === 'ArrowRight' || k === 'PageDown' || (k === ' ' && !e.shiftKey)) { e.preventDefault(); go(current + 1); }
+    else if (k === 'ArrowUp' || k === 'ArrowLeft' || k === 'PageUp' || (k === ' ' && e.shiftKey)) { e.preventDefault(); go(current - 1); }
+    else if (k === 'Home') { e.preventDefault(); go(0); }
+    else if (k === 'End') { e.preventDefault(); go(slides.length - 1); }
+    else if (k === 'f' || k === 'F') {
+      if (!document.fullscreenElement && root.requestFullscreen) root.requestFullscreen().catch(function () {});
+      else if (document.exitFullscreen) document.exitFullscreen();
+    }
+  });
+
+  if ('IntersectionObserver' in window && !reduce) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { threshold: 0.35 });
+    slides.forEach(function (s) { io.observe(s); });
+  } else { slides.forEach(function (s) { s.classList.add('in'); }); }
+
+  document.querySelectorAll('[data-top]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); go(0); }); });
+
+  var dlg = document.getElementById('zoom'), big = dlg.querySelector('img');
+  document.querySelectorAll('[data-zoom]').forEach(function (f) {
+    f.addEventListener('click', function () {
+      var img = f.querySelector('img'); big.src = img.currentSrc || img.src; big.alt = img.alt;
+      if (dlg.showModal) dlg.showModal(); else window.open(big.src, '_blank');
+    });
+  });
+  dlg.addEventListener('click', function () { dlg.close(); });
+})();
+</script>
+</body>
+</html>

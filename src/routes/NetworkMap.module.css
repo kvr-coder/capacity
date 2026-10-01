@@ -1,0 +1,334 @@
+/*
+ * The network map host.
+ *
+ * The canvas is the screen, so it runs edge to edge and everything else is a
+ * thin band above or below it: the filter row, the breadcrumb, the legend that
+ * names every encoding on the stage, and the panel that answers "what could
+ * move here". Only the bands carry horizontal padding — the stage never does,
+ * because a map with a margin reads as a picture of a map.
+ *
+ * No colour is written here. Every value is a token from `tokens.css`.
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: var(--space-6);
+}
+
+.band {
+  padding: var(--space-4) var(--space-5) 0;
+  min-width: 0;
+}
+
+.bandTight {
+  padding: var(--space-3) var(--space-5) 0;
+  min-width: 0;
+}
+
+/* === breadcrumb chrome =================================================== */
+
+.chrome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.crumb:hover:not(:disabled) {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+.crumb:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.crumbOn {
+  background: var(--surface-1);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.crumbSep {
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.chromeTail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.runtime {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* === stage =============================================================== */
+
+.stage {
+  margin-top: var(--space-3);
+  min-width: 0;
+}
+
+/* === legend ============================================================== */
+
+.legendRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.legendBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.legendTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.legendNote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.edgeList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.edgeItem {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.edgeMark {
+  flex: none;
+  align-self: center;
+}
+
+.edgeStroke {
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.edgeLabel {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.edgeHint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.badgeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.badgePlate {
+  fill: var(--surface-2);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.badgeText {
+  fill: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* === "what can move here" ================================================ */
+
+.moveList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.moveItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.moveCode {
+  font-weight: 600;
+}
+
+.moveFact {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.moveActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* === drawer ============================================================== */
+
+.drawerStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.drawerFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  min-width: 0;
+}
+
+.factLabel {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.factValue {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.candidateHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.candidateName {
+  font-weight: 600;
+}
+
+.candidateNote {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.groupRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* === shortcuts =========================================================== */
+
+.keyTable {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+  margin: 0;
+}
+
+.keyTable dt {
+  margin: 0;
+}
+
+.keyTable dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+}

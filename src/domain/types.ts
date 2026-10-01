@@ -288,6 +288,17 @@ export interface Routing {
   /** Undefined = approved for the whole horizon. */
   validFromWeek?: WeekIndex
   validToWeek?: WeekIndex
+  /**
+   * Where this version came from. Same rule and the same reason as
+   * {@link OeeOverride.source}: absent (or `'master'`) means master data,
+   * `'scenario'` means `applyMoves` SYNTHESISED it so a `resourceMove` could
+   * put an operation on a work center master data carries no version for.
+   *
+   * A synthesised version is a modelled proposal, never planning truth: it is
+   * never `primary`, and the run's warnings say what would have to be true — a
+   * qualification, a retrofit — before the plan it implies is executable.
+   */
+  source?: 'master' | 'scenario'
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +333,13 @@ export interface OeeOverride {
   fromWeek?: WeekIndex
   toWeek?: WeekIndex
   note?: string
+  /**
+   * Where this override came from. The rule and the reason are identical to
+   * {@link OeeGlidePath.source}: a planner's explicit decision outranks
+   * background master data whatever its scope or window. Absent means
+   * `'master'`, so loaded SAP extracts and the factory need no change.
+   */
+  source?: 'master' | 'scenario'
 }
 
 /**
@@ -346,6 +364,24 @@ export interface OeeGlidePath {
    */
   curve: 'linear' | 'sCurve' | 'step'
   label: string
+  /**
+   * PROVENANCE, and it decides precedence before anything else does.
+   *
+   * A path stamped `'scenario'` was introduced by an enabled scenario move —
+   * a planner said, in the decision log, that this is the ramp they want. A
+   * path stamped `'master'` (or carrying no stamp at all) came from the loaded
+   * extract or the factory: background data the planner never typed.
+   *
+   * A scenario path therefore beats a master path over any week both cover,
+   * whatever their `fromWeek`. Without this a seeded programme starting at W6
+   * silently overrode a planner's own W0..W77 ramp for 72 of 78 weeks, and the
+   * decision they logged did nothing. Ties *within* one tier fall back to the
+   * older rule: greatest `fromWeek`, then work-center scope over plant, then
+   * declaration order.
+   *
+   * Absent means `'master'`, so SAP loaders and the factory need no change.
+   */
+  source?: 'master' | 'scenario'
 }
 
 // ---------------------------------------------------------------------------

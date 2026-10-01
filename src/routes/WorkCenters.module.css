@@ -1,0 +1,283 @@
+/*
+ * The work-center register and the detail panel under it.
+ *
+ * Two rules shape this file. The page never scrolls sideways — the register is
+ * fifteen columns wide and scrolls inside its own wrapper, which `DataTable`
+ * already owns. And the detail panel is a reading surface: one column of bands
+ * with generous space between them, because the arithmetic in the build-up is
+ * the thing a planner has to be able to trust at a glance.
+ *
+ * No colour is written here. Every value is a token from `tokens.css`.
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+
+/* === KPI row ============================================================= */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* === register ============================================================ */
+
+.registerHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.cellStack {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cellName {
+  display: block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pool {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.poolMuted {
+  color: var(--text-muted);
+}
+
+.peakCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* === detail panel ======================================================== */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.detailHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.detailSub {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+.verdictLead {
+  font-weight: 600;
+}
+
+/* === the two-up bands ==================================================== */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.controlRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.knob {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.knobTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.knobNote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.grow {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* === build-up ============================================================ */
+
+.buildUpRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.stepLabel {
+  color: var(--text-primary);
+}
+
+.stepMuted {
+  color: var(--text-secondary);
+}
+
+.stepStrong {
+  font-weight: 600;
+}
+
+.operand {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.result {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.resultStrong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* === pager =============================================================== */
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.pagerLabel {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.pagerButtons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* === modal form ========================================================== */
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.formWide {
+  grid-column: 1 / -1;
+}
+
+.formNote {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* === misc ================================================================ */
+
+.inlineActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.sourceNote {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}

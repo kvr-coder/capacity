@@ -1,0 +1,131 @@
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px 32px;
+  min-width: 0;
+  /* The negative space is the point — this is the one loud thing on a screen. */
+  padding: 28px 24px 26px;
+  font-family: var(--font-sans);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.main {
+  min-width: 0;
+}
+
+.label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.figure {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 46px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-variant-numeric: proportional-nums;
+  color: var(--text-primary);
+}
+
+.unit {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 12px;
+}
+
+.delta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.deltaGlyph {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.context,
+.caption {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.caption {
+  margin: 10px 0 0;
+  max-width: 52ch;
+  line-height: 1.5;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.statusGlyph {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
+  min-width: 180px;
+}
+
+.meterSlot {
+  min-width: 180px;
+}
+
+.secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  margin: 0;
+}
+
+.secondaryItem {
+  min-width: 0;
+}
+
+.secondaryLabel {
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.secondaryValue {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}

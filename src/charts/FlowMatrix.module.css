@@ -1,0 +1,70 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.frame {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.scroller {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.svg {
+  display: block;
+}
+
+.svg:focus {
+  outline: none;
+}
+
+.svg:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+.header {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  fill: var(--text-muted);
+}
+
+.rowLabel {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  fill: var(--text-secondary);
+}
+
+/* Totals live in the margin, never on top of a ramp step. */
+.total {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  fill: var(--text-primary);
+}
+
+.columnTotal {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  fill: var(--text-muted);
+}
+
+.missing {
+  fill: var(--surface-sunken);
+}
+
+.focusRing {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  pointer-events: none;
+}

@@ -1,0 +1,150 @@
+.tabs {
+  margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0;
+  padding: 0 var(--space-4);
+}
+
+.panel {
+  padding-top: var(--space-4);
+}
+
+.prose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: var(--text-md);
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.prose p {
+  margin: 0;
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--gridline);
+}
+
+.step:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+
+.step h3 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.step p {
+  color: var(--text-secondary);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  text-align: left;
+  padding: 6px var(--space-2);
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--axis);
+}
+
+.table td {
+  padding: 8px var(--space-2);
+  border-bottom: 1px solid var(--gridline);
+  vertical-align: top;
+  color: var(--text-primary);
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: 1.1em;
+  color: var(--text-secondary);
+}
+
+.list li {
+  padding-left: 2px;
+}
+
+.glossary {
+  display: flex;
+  flex-direction: column;
+}
+
+.glossaryRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) 1fr;
+  gap: var(--space-3);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.glossaryRow:last-child {
+  border-bottom: none;
+}
+
+.glossaryRow dt {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.glossaryRow dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--gridline);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.footer svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 560px) {
+  .glossaryRow {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

@@ -1,0 +1,84 @@
+.tooltip {
+  position: absolute;
+  z-index: 4;
+  /* Never eats the hit target it describes. */
+  pointer-events: none;
+  min-width: 148px;
+  max-width: 280px;
+  padding: 9px 11px 10px;
+  font-family: var(--font-sans);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+
+.title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 14px;
+  margin: 8px 0 0;
+}
+
+.row {
+  display: contents;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 11px;
+  /* Text never wears the series colour — the mark beside it carries that. */
+  color: var(--text-secondary);
+}
+
+.value {
+  margin: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-primary);
+}
+
+.emphasis .label,
+.emphasis .value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--series-other);
+}
+
+.statusGlyph {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.extra {
+  margin-top: 8px;
+  padding-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--gridline);
+}

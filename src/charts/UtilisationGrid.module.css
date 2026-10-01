@@ -1,0 +1,265 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  font-family: var(--font-sans);
+}
+
+/* Controls sit in one row above the content they scope. */
+.controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.controlsLabel {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sortGroup {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--text-primary);
+}
+
+.sortButton[aria-pressed='true'] {
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border-color: var(--border);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 1px;
+}
+
+.sortGlyph {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.controlsNote {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* --- the grid ------------------------------------------------------------- */
+
+.grid {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.header {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  overflow: hidden;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.headerTick {
+  position: absolute;
+  bottom: 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.labels {
+  position: absolute;
+  left: 0;
+  z-index: 2;
+  overflow: hidden;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+}
+
+.rowLabel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rowActive {
+  background: var(--surface-sunken);
+}
+
+.rowSelected {
+  box-shadow: inset 2px 0 0 var(--text-primary);
+}
+
+.chip {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--series-other);
+}
+
+.code {
+  flex: none;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.class {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.plot {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.canvas {
+  display: block;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.crossRow,
+.crossColumn {
+  fill: var(--text-primary);
+  opacity: 0.08;
+}
+
+.focusRing {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 2;
+}
+
+/*
+ * Transparent surface over every layer: it owns both scrollbars and all pointer
+ * events, so nothing can tear apart from anything else while scrolling.
+ */
+.scroller {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: auto;
+  outline-offset: -2px;
+}
+
+.scroller:focus {
+  outline: none;
+}
+
+.scroller:focus-visible {
+  outline: 2px solid var(--text-primary);
+}
+
+.sizer {
+  pointer-events: none;
+}
+
+/* --- footer --------------------------------------------------------------- */
+
+.footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.keyItem {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.glyphChevron {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+.glyphHatch {
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--axis) 0 1px,
+    transparent 1px 4px
+  );
+}
