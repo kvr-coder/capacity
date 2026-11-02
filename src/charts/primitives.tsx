@@ -38,6 +38,13 @@ export interface ElementRefLike {
 }
 
 /**
+ * `useLayoutEffect` in the browser, `useEffect` everywhere else. Measurement
+ * has to happen before paint or the first frame shows the fallback width, but
+ * a layout effect on the server is a warning and does nothing useful.
+ */
+export const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
+/**
  * Measured content width of `ref`, falling back to `fallback` before the first
  * observation (and in any environment without `ResizeObserver`). Charts read
  * this to lay themselves out, so they reflow with the card instead of needing a
@@ -46,7 +53,7 @@ export interface ElementRefLike {
 export function useChartSize(ref: ElementRefLike, fallback = 640): number {
   const [width, setWidth] = useState(fallback)
 
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const element = ref.current
     if (!element) return
     const measure = (): void => {

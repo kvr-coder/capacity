@@ -1,0 +1,372 @@
+/*
+ * The frame. A two-row grid (header, body) over a two-column body (rail, main).
+ * Only `.main` scrolls, and it can only scroll vertically — every column is
+ * `minmax(0, …)` so nothing inside can push the layout wider than the viewport.
+ */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface-0);
+}
+
+.skip {
+  position: absolute;
+  z-index: 300;
+  top: -60px;
+  left: var(--space-3);
+  padding: 8px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.skip:focus {
+  top: var(--space-2);
+}
+
+/* === header ============================================================== */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  height: var(--header-height);
+  padding: 0 var(--space-4);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  min-width: 0;
+}
+
+.mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to bottom,
+    var(--series-1) 0 20%,
+    var(--series-2) 20% 40%,
+    var(--series-3) 40% 60%,
+    var(--series-4) 60% 80%,
+    var(--series-5) 80% 100%
+  );
+}
+
+.brandName {
+  font-size: var(--text-md);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.scenarioCluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border);
+}
+
+.scenarioSelect {
+  width: 178px;
+  min-width: 0;
+}
+
+.scenarioDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--series-other);
+}
+
+.slot1 {
+  background: var(--series-1);
+}
+
+.slot2 {
+  background: var(--series-2);
+}
+
+.slot3 {
+  background: var(--series-3);
+}
+
+.slot4 {
+  background: var(--series-4);
+}
+
+.slot5 {
+  background: var(--series-5);
+}
+
+.historyCluster {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.runtimeValue {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.clocks {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.clockDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--series-other);
+}
+
+.clockCode {
+  color: var(--text-muted);
+}
+
+.clockTime {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* Outside plausible shift hours: still legible, visibly quieter. */
+.clockOff {
+  color: var(--text-muted);
+}
+
+.commandButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.commandButton:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
+.commandText {
+  white-space: nowrap;
+}
+
+.kbd {
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-sunken);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* === body ================================================================ */
+
+.body {
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-3) var(--space-2);
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.rail ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.railLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.railLink:hover {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+.railLinkOn {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  box-shadow: inset 2px 0 0 var(--series-1);
+}
+
+.railLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px var(--space-4);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--status-critical);
+  font-size: var(--text-sm);
+  color: var(--delta-bad-text);
+}
+
+.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--gridline);
+  border-top-color: var(--series-1);
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .spinner {
+    animation: spin 800ms linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* === narrow ==============================================================
+ * Under 1180px the rail collapses to icons and the header sheds everything
+ * that is context rather than control. Nothing wraps to a second row, because
+ * a header that changes height moves every screen under it.
+ */
+
+@media (max-width: 1180px) {
+  .body {
+    grid-template-columns: var(--rail-width-collapsed) minmax(0, 1fr);
+  }
+
+  .railLabel {
+    display: none;
+  }
+
+  .railLink {
+    justify-content: center;
+    padding: 9px 0;
+  }
+
+  .clocks {
+    display: none;
+  }
+
+  .commandText {
+    display: none;
+  }
+
+  .brandName {
+    display: none;
+  }
+
+  .scenarioSelect {
+    width: 132px;
+  }
+
+  .header {
+    padding: 0 var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .historyCluster {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 860px) {
+  .runtime {
+    display: none;
+  }
+}

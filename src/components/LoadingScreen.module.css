@@ -1,0 +1,216 @@
+.screen {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: var(--space-5);
+  background: var(--surface-0);
+}
+
+.panel {
+  width: min(560px, 100%);
+  padding: var(--space-6);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+/* The five categorical slots, as a five-bar mark. Identity, not decoration. */
+.mark {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    to bottom,
+    var(--series-1) 0 20%,
+    var(--series-2) 20% 40%,
+    var(--series-3) 40% 60%,
+    var(--series-4) 60% 80%,
+    var(--series-5) 80% 100%
+  );
+}
+
+.name {
+  font-size: var(--text-lg);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.tagline {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.track {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  background: var(--series-1);
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fill {
+    transition: width var(--duration-base) var(--ease);
+  }
+}
+
+.percent {
+  flex: none;
+  width: 4ch;
+  text-align: right;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.phase {
+  margin-top: var(--space-3);
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.steps {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  color: var(--text-muted);
+}
+
+.stepMark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-1);
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--axis);
+}
+
+.stepDone {
+  color: var(--text-secondary);
+}
+
+.stepDone .stepMark {
+  background: var(--status-good);
+  border-color: var(--status-good);
+  color: var(--surface-2);
+}
+
+.stepActive {
+  color: var(--text-primary);
+}
+
+.stepActive .stepMark {
+  border-color: var(--series-1);
+}
+
+.stepActive .dot {
+  background: var(--series-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .stepActive .dot {
+    animation: pulse 1400ms ease-in-out infinite;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.stepText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stepLabel {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.stepDetail {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.foot {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.failure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--status-critical);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.failureTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--delta-bad-text);
+}
+
+.failureMessage {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
